@@ -8,26 +8,47 @@ const GuideContainer = styled.div`
   width: 100%;
   background-color: rgba(0, 0, 0, 0.7);
   color: white;
-  padding: 10px;
-  border-radius: 5px;
-  font-size: 14px;
+  padding: 5px;
+  border-radius: 0 0 5px 5px;
+  font-size: 12px;
   z-index: 100;
   text-align: center;
+  max-height: 80px;
+  overflow: auto;
+  
+  @media (max-width: 480px) {
+    padding: 3px;
+    max-height: 60px;
+    font-size: 11px;
+  }
 `;
 
 const Title = styled.h4`
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   color: #fff;
-  font-size: 16px;
+  font-size: 13px;
+  
+  @media (max-width: 480px) {
+    margin: 0 0 2px;
+    font-size: 12px;
+  }
 `;
 
 const List = styled.ul`
   list-style-type: none;
   padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  
+  @media (max-width: 480px) {
+    gap: 6px;
+  }
 `;
 
 const ListItem = styled.li`
-  margin-bottom: 5px;
+  margin: 0;
 `;
 
 const TouchGuide = () => {

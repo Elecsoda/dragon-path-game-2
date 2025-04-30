@@ -3,42 +3,66 @@ import styled from 'styled-components';
 
 const ControlContainer = styled.div`
   position: fixed;
-  bottom: 20px;
+  bottom: 5px;
   left: 50%;
   transform: translateX(-50%);
   background-color: rgba(255, 255, 255, 0.8);
-  padding: 10px;
+  padding: 5px;
   border-radius: 10px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
   z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: center;
+  max-width: 95%;
+  max-height: 130px;
+  overflow-y: auto;
+  
+  @media (max-width: 480px) {
+    bottom: 3px;
+    padding: 3px;
+    max-height: 110px;
+    border-radius: 8px;
+  }
 `;
 
 const ButtonGroup = styled.div`
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 5px;
+  gap: 3px;
+  
+  @media (max-width: 480px) {
+    gap: 2px;
+  }
 `;
 
 const RadioGroup = styled.div`
   display: flex;
   justify-content: center;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
+  
+  @media (max-width: 480px) {
+    margin-bottom: 3px;
+  }
 `;
 
 const RadioLabel = styled.label`
-  margin: 0 8px;
+  margin: 0 5px;
   cursor: pointer;
   display: flex;
   align-items: center;
+  font-size: 13px;
+  
+  @media (max-width: 480px) {
+    margin: 0 3px;
+    font-size: 12px;
+  }
 `;
 
 const PathInfo = styled.div`
-  margin-top: 10px;
-  font-size: 14px;
+  margin-top: 5px;
+  font-size: 12px;
   color: #333;
 `;
 
@@ -54,21 +78,21 @@ const TransparentButton = styled.button`
 `;
 
 const StartPointInfo = styled.div`
-  margin-top: 5px;
-  font-size: 12px;
+  margin-top: 3px;
+  font-size: 11px;
   color: #666;
 `;
 
 const AnimationControls = styled.div`
   display: flex;
   justify-content: center;
-  gap: 5px;
-  margin-top: 10px;
+  gap: 3px;
+  margin-top: 5px;
 `;
 
 const HelpText = styled.div`
-  margin-top: 10px;
-  font-size: 12px;
+  margin-top: 5px;
+  font-size: 11px;
   color: #666;
   font-style: italic;
   text-align: center;

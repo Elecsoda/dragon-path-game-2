@@ -17,8 +17,8 @@ import {
 } from "./pathUtils";
 
 // 常量
-const CUBE_SIZE = 0.8;
-const GRID_SPACING = 2.0; // 增加格子间距，原来是默认的1.0
+const CUBE_SIZE = 0.6;
+const GRID_SPACING = 1.5;
 
 // 辅助函数 - 生成立方体网格点
 const generateGridPoints = (gridSize) => {
@@ -60,6 +60,19 @@ const areAdjacent = (point1, point2) => {
     (xDiff === 0 && yDiff === 1 && zDiff === 0) ||
     (xDiff === 0 && yDiff === 0 && zDiff === 1)
   );
+};
+
+// 相机初始化组件
+const CameraInitializer = () => {
+  const { camera } = useThree();
+  
+  useEffect(() => {
+    // 设置更好的视角，不是45度角
+    camera.position.set(5, 3, 8);
+    camera.lookAt(0, 0, 0);
+  }, [camera]);
+  
+  return null;
 };
 
 const CubeNavigation = forwardRef((props, ref) => {
@@ -771,63 +784,56 @@ const CubeNavigation = forwardRef((props, ref) => {
   };
 
   return (
-    <>
+    <group ref={groupRef} onClick={handleCubeClick}>
       <OrbitControls
         ref={controlsRef}
-        makeDefault
         enabled={orbitEnabled}
-        enableDamping={true}
-        dampingFactor={0.15}
-        rotateSpeed={0.8}
+        enableDamping
+        dampingFactor={0.05}
         minDistance={3}
         maxDistance={20}
-        enablePan={true}
-        enableZoom={true}
-        enableRotate={true}
-        mouseButtons={{
-          LEFT: THREE.MOUSE.ROTATE,
-          MIDDLE: THREE.MOUSE.DOLLY,
-          RIGHT: THREE.MOUSE.PAN,
-        }}
+        // 设置初始相机位置
+        makeDefault
       />
+      
+      {/* 初始化相机位置 */}
+      <CameraInitializer />
+      
+      {/* 绘制立方体框架 */}
+      {gridPoints.current.map((point, index) => (
+        <CubeFrame
+          key={index}
+          position={point.position}
+          size={CUBE_SIZE}
+          color={0xcccccc}
+          isSelected={currentPath.includes(point) && currentPath[0] !== point}
+          isStart={currentPath.length > 0 && currentPath[0] === point}
+          isEnd={
+            currentPath.length > 1 &&
+            currentPath[currentPath.length - 1] === point
+          }
+          isHovered={
+            hoveredPoint === point && (canHighlight(point) || !manualMode)
+          }
+          isTempSelected={isTempSelected(point)}
+          isClickable={manualMode ? clickablePoints.includes(point) : true}
+          userData={{ isGridPoint: true, index: point.index }}
+          setMeshRef={(ref) => storeMeshRef(point.index, ref)}
+        />
+      ))}
 
-      <group ref={groupRef} onClick={handleCubeClick}>
-        {/* 绘制立方体框架 */}
-        {gridPoints.current.map((point, index) => (
-          <CubeFrame
-            key={index}
-            position={point.position}
-            size={CUBE_SIZE}
-            color={0xcccccc}
-            isSelected={currentPath.includes(point) && currentPath[0] !== point}
-            isStart={currentPath.length > 0 && currentPath[0] === point}
-            isEnd={
-              currentPath.length > 1 &&
-              currentPath[currentPath.length - 1] === point
-            }
-            isHovered={
-              hoveredPoint === point && (canHighlight(point) || !manualMode)
-            }
-            isTempSelected={isTempSelected(point)}
-            isClickable={manualMode ? clickablePoints.includes(point) : true}
-            userData={{ isGridPoint: true, index: point.index }}
-            setMeshRef={(ref) => storeMeshRef(point.index, ref)}
-          />
-        ))}
+      {/* 绘制路径线 */}
+      {pathLine && (
+        <Line points={pathLine} color="deepskyblue" lineWidth={3} />
+      )}
 
-        {/* 绘制路径线 */}
-        {pathLine && (
-          <Line points={pathLine} color="deepskyblue" lineWidth={3} />
-        )}
-
-        {/* 动画球体 - 仅在动画播放时显示 */}
-        {animationPlaying && animationSphere && (
-          <mesh position={animationSphere.position}>
-            <sphereGeometry args={[0.1, 16, 16]} />
-            <meshBasicMaterial color={0xff0000} />
-          </mesh>
-        )}
-      </group>
+      {/* 动画球体 - 仅在动画播放时显示 */}
+      {animationPlaying && animationSphere && (
+        <mesh position={animationSphere.position}>
+          <sphereGeometry args={[0.1, 16, 16]} />
+          <meshBasicMaterial color={0xff0000} />
+        </mesh>
+      )}
 
       {/* 方向箭头 */}
       {manualMode && (
@@ -836,7 +842,7 @@ const CubeNavigation = forwardRef((props, ref) => {
           onDirectionClick={handleDirectionClick}
         />
       )}
-    </>
+    </group>
   );
 });
 
