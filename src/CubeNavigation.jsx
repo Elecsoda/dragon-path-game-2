@@ -445,11 +445,11 @@ const CubeNavigation = forwardRef((props, ref) => {
 
     // 使用路径生成算法
     setTimeout(() => {
-      // 使用路径生成函数，传入gridSize参数
+      // 使用路径生成函数，强制使用随机路径，传入gridSize参数
       const path = generatePath(
         gridPoints.current,
         startPoint,
-        useRandomPath,
+        true, // 始终使用随机路径
         gridSize
       );
 

@@ -59,6 +59,11 @@ function App() {
     if (cubeNavigationRef.current && cubeNavigationRef.current.stopAnimation) {
       cubeNavigationRef.current.stopAnimation();
     }
+    
+    // 直接重置路径
+    if (cubeNavigationRef.current && cubeNavigationRef.current.resetPath) {
+      cubeNavigationRef.current.resetPath();
+    }
 
     // 清空路径和起点
     setManualMode(isManual);
