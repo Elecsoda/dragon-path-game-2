@@ -23,17 +23,26 @@ const GRID_SPACING = 1.5;
 // 辅助函数 - 生成立方体网格点
 const generateGridPoints = (gridSize) => {
   const points = [];
-  const offset = ((gridSize - 1) / 2) * GRID_SPACING; // 调整偏移量计算
+  
+  // 处理gridSize可能是对象或数字的情况
+  const width = typeof gridSize === 'object' ? gridSize.width : gridSize;
+  const height = typeof gridSize === 'object' ? gridSize.height : gridSize;
+  const depth = typeof gridSize === 'object' ? gridSize.depth : gridSize;
+  
+  // 计算每个维度的偏移量，确保方阵居中
+  const offsetX = ((width - 1) / 2) * GRID_SPACING;
+  const offsetY = ((height - 1) / 2) * GRID_SPACING;
+  const offsetZ = ((depth - 1) / 2) * GRID_SPACING;
 
-  for (let x = 0; x < gridSize; x++) {
-    for (let y = 0; y < gridSize; y++) {
-      for (let z = 0; z < gridSize; z++) {
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < height; y++) {
+      for (let z = 0; z < depth; z++) {
         points.push({
           index: { x, y, z },
           position: new THREE.Vector3(
-            x * GRID_SPACING - offset,
-            y * GRID_SPACING - offset,
-            z * GRID_SPACING - offset
+            x * GRID_SPACING - offsetX,
+            y * GRID_SPACING - offsetY,
+            z * GRID_SPACING - offsetZ
           ),
         });
       }
@@ -78,6 +87,7 @@ const CameraInitializer = () => {
 const CubeNavigation = forwardRef((props, ref) => {
   const {
     manualMode,
+    drawingMode,
     selectedStartPoint,
     currentPath,
     onPathUpdate,
@@ -148,10 +158,15 @@ const CubeNavigation = forwardRef((props, ref) => {
     const directions = [];
     const clickable = [];
     const { x, y, z } = currentPos.index;
+    
+    // 获取当前gridSize的各个维度
+    const width = typeof gridSize === 'object' ? gridSize.width : gridSize;
+    const height = typeof gridSize === 'object' ? gridSize.height : gridSize;
+    const depth = typeof gridSize === 'object' ? gridSize.depth : gridSize;
 
-    // 检查六个方向，注意使用gridSize变量
+    // 检查六个方向，注意使用不同维度的边界值
     // 右
-    if (x < gridSize - 1) {
+    if (x < width - 1) {
       const nextPoint = findPointByIndex(x + 1, y, z);
       if (nextPoint && !isPointInPath(nextPoint)) {
         directions.push("x+");
@@ -167,7 +182,7 @@ const CubeNavigation = forwardRef((props, ref) => {
       }
     }
     // 上
-    if (y < gridSize - 1) {
+    if (y < height - 1) {
       const nextPoint = findPointByIndex(x, y + 1, z);
       if (nextPoint && !isPointInPath(nextPoint)) {
         directions.push("y+");
@@ -183,7 +198,7 @@ const CubeNavigation = forwardRef((props, ref) => {
       }
     }
     // 前
-    if (z < gridSize - 1) {
+    if (z < depth - 1) {
       const nextPoint = findPointByIndex(x, y, z + 1);
       if (nextPoint && !isPointInPath(nextPoint)) {
         directions.push("z+");
@@ -216,6 +231,9 @@ const CubeNavigation = forwardRef((props, ref) => {
   // 检查点是否可点击（必须是相邻的未访问点）
   const isPointClickable = (point) => {
     if (!manualMode || !currentPosition || !point) return false;
+    
+    // 如果不是绘制模式，不允许添加点（需要先进入绘制模式）
+    if (manualMode && !drawingMode && currentPath.length >= 1) return false;
 
     // 如果是第一个点，允许点击
     if (currentPath.length === 0) return true;
@@ -226,7 +244,7 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 处理方向箭头点击
   const handleDirectionClick = (direction) => {
-    if (!currentPosition || !manualMode) return;
+    if (!currentPosition || !manualMode || !drawingMode) return;
 
     const { x, y, z } = currentPosition.index;
     let nextPoint;
@@ -256,24 +274,32 @@ const CubeNavigation = forwardRef((props, ref) => {
     }
 
     if (nextPoint && !isPointInPath(nextPoint)) {
-      handlePointSelection(nextPoint);
+      // 在绘制路线模式下，使用handleAddPoint而不是handlePointSelection
+      handleAddPoint(nextPoint);
     }
   };
 
   // 通过索引查找点
   const findPointByIndex = (x, y, z) => {
+    // 获取当前gridSize的各个维度
+    const width = typeof gridSize === 'object' ? gridSize.width : gridSize;
+    const height = typeof gridSize === 'object' ? gridSize.height : gridSize;
+    const depth = typeof gridSize === 'object' ? gridSize.depth : gridSize;
+    
     if (
       x < 0 ||
-      x >= gridSize ||
+      x >= width ||
       y < 0 ||
-      y >= gridSize ||
+      y >= height ||
       z < 0 ||
-      z >= gridSize
+      z >= depth
     ) {
       return null;
     }
+
     return gridPoints.current.find(
-      (p) => p.index.x === x && p.index.y === y && p.index.z === z
+      (point) =>
+        point.index.x === x && point.index.y === y && point.index.z === z
     );
   };
 
@@ -324,13 +350,17 @@ const CubeNavigation = forwardRef((props, ref) => {
 
     // 处理有效点击
     if (selectingStartPoint) {
-      // 选择起点时
+      // 选择起点时，所有格子都可以点击
       event.stopPropagation();
       onStartPointSelect(clickedPoint);
     } else if (manualMode) {
       // 手动模式下
-      if (isPointClickable(clickedPoint)) {
-        // 如果是可点击的点（相邻且未访问），则添加到路径
+      if (currentPath.length === 0) {
+        // 如果路径为空，设置为起点
+        event.stopPropagation();
+        handleNewStartPoint(clickedPoint);
+      } else if (drawingMode && isPointClickable(clickedPoint)) {
+        // 如果是绘制模式且点是可点击的点（相邻且未访问），则添加到路径
         event.stopPropagation();
         handleAddPoint(clickedPoint);
       }
@@ -625,9 +655,7 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 处理悬停，保持鼠标悬停显示而不干扰控制器
   const handlePointHover = (event) => {
-    if (!selectingStartPoint && !manualMode) return;
-
-    // 不需要阻止事件传播，以便OrbitControls可以继续工作
+    // 不阻止事件传播，以便OrbitControls可以继续工作
     raycaster.setFromCamera(mouse, camera);
 
     const allMeshes = Object.values(meshRefs.current);
@@ -643,10 +671,15 @@ const CubeNavigation = forwardRef((props, ref) => {
         const [x, y, z] = pointKey.split("-").map(Number);
         const point = findPointByIndex(x, y, z);
 
-        if (manualMode && !selectingStartPoint) {
+        // 在选择起点模式下，允许悬停在任何格子上
+        if (selectingStartPoint) {
+          setHoveredPoint(point);
+        } else if (manualMode && !selectingStartPoint) {
+          // 在手动模式下，只有可点击的点才能高亮
           const isClickable = isPointClickable(point);
           setHoveredPoint(isClickable ? point : null);
         } else {
+          // 自动模式下都可以高亮
           setHoveredPoint(point);
         }
       } else {
@@ -756,10 +789,14 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 更新方向箭头
   useEffect(() => {
-    if (currentPosition && manualMode) {
+    if (currentPosition && manualMode && drawingMode) {
       updateEnabledDirections(currentPosition);
+    } else if (manualMode && !drawingMode) {
+      // 如果是手动模式但不是绘制模式，清空方向指示
+      setEnabledDirections([]);
+      setClickablePoints([]);
     }
-  }, [currentPosition, manualMode, currentPath]);
+  }, [currentPosition, manualMode, drawingMode, currentPath]);
 
   // 检查一个点是否为临时选择的点
   const isTempSelected = (point) => {
@@ -771,7 +808,7 @@ const CubeNavigation = forwardRef((props, ref) => {
     );
   };
 
-  // 检查点是否可被高亮（在手动模式下，只有可点击的点才能高亮）
+  // 检查点是否可被高亮（在手动模式下，只有可点击的点才能高亮，选择起点模式下所有点都可高亮）
   const canHighlight = (point) => {
     if (selectingStartPoint) return true;
     if (!manualMode) return true;
@@ -816,7 +853,8 @@ const CubeNavigation = forwardRef((props, ref) => {
             hoveredPoint === point && (canHighlight(point) || !manualMode)
           }
           isTempSelected={isTempSelected(point)}
-          isClickable={manualMode ? clickablePoints.includes(point) : true}
+          isClickable={selectingStartPoint || manualMode ? (selectingStartPoint || clickablePoints.includes(point)) : true}
+          inSelectionMode={selectingStartPoint}
           userData={{ isGridPoint: true, index: point.index }}
           setMeshRef={(ref) => storeMeshRef(point.index, ref)}
         />
@@ -835,8 +873,8 @@ const CubeNavigation = forwardRef((props, ref) => {
         </mesh>
       )}
 
-      {/* 方向箭头 */}
-      {manualMode && (
+      {/* 方向箭头 - 只在手动绘制模式下显示 */}
+      {manualMode && drawingMode && (
         <DirectionArrows
           enabledDirections={enabledDirections}
           onDirectionClick={handleDirectionClick}

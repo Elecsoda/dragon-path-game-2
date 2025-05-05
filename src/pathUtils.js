@@ -1022,7 +1022,7 @@ function areAdjacentIndices(x1, y1, z1, x2, y2, z2) {
  * @param {Array} gridPoints - 网格点列表
  * @param {Object} startPoint - 起始点
  * @param {boolean} useRandomPath - 是否使用随机路径（否则使用哈密顿路径）
- * @param {number} gridSize - 网格大小
+ * @param {Object|number} gridSize - 网格大小，可以是数字或者包含width、height、depth的对象
  * @returns {Array} - 生成的路径
  */
 export const generatePath = (gridPoints, startPoint, useRandomPath = false, gridSize = 3) => {
@@ -1039,7 +1039,13 @@ export const generatePath = (gridPoints, startPoint, useRandomPath = false, grid
       return generateRandomPath(gridPoints, startPoint);
     } else {
       // 完整路径模式 - 使用确定性的路径生成算法
-      return generateFixedHamiltonianPath(gridPoints, startPoint, gridSize);
+      // 对于非立方体的网格，可能需要特殊处理
+      // 如果长宽高不同，我们使用最大边长作为gridSize参数传递给路径生成算法
+      const uniformGridSize = typeof gridSize === 'object' 
+        ? Math.max(gridSize.width, gridSize.height, gridSize.depth)
+        : gridSize;
+      
+      return generateFixedHamiltonianPath(gridPoints, startPoint, uniformGridSize);
     }
   } catch (error) {
     console.error('路径生成出错:', error);

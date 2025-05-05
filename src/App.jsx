@@ -4,7 +4,6 @@ import styled from "styled-components";
 import CubeNavigation from "./CubeNavigation";
 import TouchGuide from "./TouchGuide";
 import ControlPanel from "./ControlPanel";
-import LayerSelector from "./LayerSelector";
 import GridSizeControl from "./GridSizeControl";
 import "./App.css";
 
@@ -31,16 +30,38 @@ function App() {
   const [drawingMode, setDrawingMode] = useState(false);
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [animationPaused, setAnimationPaused] = useState(false);
-  const [showLayerSelector, setShowLayerSelector] = useState(false);
   const [tempSelectedPoint, setTempSelectedPoint] = useState(null);
   const [showPrompt, setShowPrompt] = useState(true);
 
-  // 添加方阵大小状态
-  const [gridSize, setGridSize] = useState(3);
+  // 添加方阵大小状态，包含长(width)、宽(depth)、高(height)
+  const [gridSize, setGridSize] = useState({ width: 3, height: 3, depth: 3 });
   const [showGridSizeControl, setShowGridSizeControl] = useState(false);
+
+  // 计算当前网格的总点数
+  const calculateTotalPoints = () => {
+    if (typeof gridSize === 'object') {
+      return gridSize.width * gridSize.height * gridSize.depth;
+    }
+    return Math.pow(gridSize, 3);
+  };
 
   // 引用立方体导航组件
   const cubeNavigationRef = useRef();
+
+  // ESC键取消选择起点模式
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && selectingStartPoint) {
+        setSelectingStartPoint(false);
+        setShowPrompt(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectingStartPoint]);
 
   // 初始化自动提示选择起点，但不直接弹出选择界面
   useEffect(() => {
@@ -86,7 +107,6 @@ function App() {
     console.log("选择了起点:", point.index);
     setSelectedStartPoint(point);
     setSelectingStartPoint(false);
-    setShowLayerSelector(false);
     setTempSelectedPoint(null);
 
     // 确保选择了新起点后，路径中只包含这一个点
@@ -98,6 +118,14 @@ function App() {
     } else {
       // 如果没有专门的方法，就直接更新路径
       setCurrentPath([point]);
+    }
+    
+    // 如果是手动模式，提示用户可以开始绘制路线
+    if (manualMode) {
+      setShowPrompt(true);
+      setTimeout(() => {
+        setShowPrompt(false);
+      }, 2000);
     }
   };
 
@@ -114,10 +142,15 @@ function App() {
       return;
     }
 
-    // 清空已有路径和临时选择点
-    setTempSelectedPoint(null);
+    // 进入选择起点模式，显示提示，不打开选择器
     setSelectingStartPoint(true);
-    setShowLayerSelector(true);
+    setTempSelectedPoint(null);
+    
+    // 显示提示用户直接点击选择起点的提示
+    setShowPrompt(true);
+    setTimeout(() => {
+      setShowPrompt(false);
+    }, 4000); // 延长提示显示时间
   };
 
   const handlePathUpdate = (newPath) => {
@@ -210,7 +243,7 @@ function App() {
 
   // 取消选择
   const handleCancelSelection = () => {
-    setShowLayerSelector(false);
+    setSelectingStartPoint(false);
     setTempSelectedPoint(null);
   };
 
@@ -260,7 +293,12 @@ function App() {
   // 处理方阵大小变更
   const handleGridSizeChange = (newSize) => {
     // 检查是否是有效的大小值
-    if (newSize >= 2 && newSize <= 8) {
+    const { width, height, depth } = newSize;
+    if (
+      width >= 2 && width <= 8 &&
+      height >= 2 && height <= 8 &&
+      depth >= 2 && depth <= 8
+    ) {
       setGridSize(newSize);
 
       // 重置路径和其他状态
@@ -323,17 +361,9 @@ function App() {
         onStartDrawPath={handleStartDrawPath}
         showPrompt={showPrompt}
         gridSize={gridSize}
+        totalPoints={calculateTotalPoints()}
         onOpenGridSizeControl={handleOpenGridSizeControl}
       />
-
-      {showLayerSelector && (
-        <LayerSelector
-          onSelect={handleStartPointSelect}
-          onCancel={handleCancelSelection}
-          onTempSelect={handleTempPointSelect}
-          gridSize={gridSize}
-        />
-      )}
 
       {showGridSizeControl && (
         <GridSizeControl
@@ -346,9 +376,17 @@ function App() {
       {showPrompt && (
         <PromptOverlay>
           <PromptText>
-            {manualMode
-              ? "请选择起点位置开始绘制路线"
-              : "请选择起点位置生成自动路径"}
+            {manualMode 
+              ? (currentPath.length === 0 
+                ? (selectingStartPoint 
+                   ? "请直接点击立方体上的任意格子作为起点" 
+                   : "请选择起点位置")
+                : drawingMode 
+                  ? "现在可以沿着相邻方格绘制路线" 
+                  : "点击「绘制路线」按钮开始创建路径")
+              : (selectingStartPoint
+                 ? "请直接点击立方体上的任意格子作为起点"
+                 : "请选择起点位置生成自动路径")}
           </PromptText>
         </PromptOverlay>
       )}

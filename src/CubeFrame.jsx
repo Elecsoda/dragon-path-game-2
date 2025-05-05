@@ -11,6 +11,7 @@ const CubeFrame = ({
   isHovered = false,
   isTempSelected = false,
   isClickable = true,
+  inSelectionMode = false,
   userData = {},
   setMeshRef = null
 }) => {
@@ -42,10 +43,18 @@ const CubeFrame = ({
     return new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size));
   }, [size]);
   
-  // 确定线条颜色和透明度
-  const lineColor = isTempSelected ? 0x9370DB : isClickable ? 0x000000 : 0xAAAAAA;
-  const lineOpacity = isTempSelected ? 0.8 : isClickable ? 0.4 : 0.2;
-  const lineWidth = isTempSelected ? 2 : 1;
+  // 确定线条颜色和透明度 - 加深手动模式下的颜色
+  // 选择起点模式下，所有格子都用明显颜色
+  const lineColor = inSelectionMode ? 0x4169E1 : // 选择模式下用皇家蓝
+                   isTempSelected ? 0x9370DB : 
+                   isClickable ? 0x000000 : 0x555555; // 加深非可点击的颜色
+                   
+  const lineOpacity = inSelectionMode ? 0.8 : // 选择模式下增加透明度
+                     isTempSelected ? 0.8 : 
+                     isClickable ? 0.6 : 0.4; // 加深手动模式下线条的透明度
+                     
+  const lineWidth = inSelectionMode ? 2 : 
+                   isTempSelected ? 2 : 1;
   
   // 起点球体大小 - 增大起点的球体
   const sphereSize = isStart ? size * 0.4 : size * 0.15;
@@ -101,9 +110,24 @@ const CubeFrame = ({
       
       {/* 可点击提示 - 在悬停时显示 */}
       {isClickable && isHovered && !isSelected && !isStart && !isEnd && (
+        <>
+          <mesh>
+            <sphereGeometry args={[size * 0.2, 16, 16]} />
+            <meshBasicMaterial color={0xFFD700} /> {/* 金色，增大尺寸 */}
+          </mesh>
+          {/* 坐标文本显示 - 添加坐标指示器，显示在格子中心 */}
+          <mesh position={[0, 0, size * 0.5]}>
+            <boxGeometry args={[size * 0.5, size * 0.25, 0.01]} />
+            <meshBasicMaterial color={0x000000} opacity={0.8} transparent={true} />
+          </mesh>
+        </>
+      )}
+      
+      {/* 在选择起点模式下，为所有格子添加微弱的亮光效果 */}
+      {inSelectionMode && !isHovered && !isSelected && !isStart && !isEnd && (
         <mesh>
-          <sphereGeometry args={[size * 0.15, 16, 16]} />
-          <meshBasicMaterial color={0xFFD700} /> {/* 金色 */}
+          <sphereGeometry args={[size * 0.1, 16, 16]} />
+          <meshBasicMaterial color={0x4169E1} opacity={0.3} transparent={true} />
         </mesh>
       )}
     </group>
