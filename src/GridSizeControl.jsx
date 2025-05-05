@@ -86,17 +86,34 @@ const ErrorText = styled.p`
   margin-bottom: 0;
 `;
 
+const GridFormRow = styled.div`
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 10px;
+  
+  > div {
+    flex: 1;
+    margin-bottom: 0;
+  }
+`;
+
 const GridSizeControl = ({ currentSize, onSizeChange, onClose }) => {
-  // 由于我们的方阵是立方体，所以长宽高相等
-  const [size, setSize] = useState(currentSize);
+  // 初始化三个维度的尺寸，如果传入的是单一值，则三个维度都使用该值
+  const initialSize = typeof currentSize === 'object' 
+    ? currentSize 
+    : { width: currentSize, height: currentSize, depth: currentSize };
+  
+  const [size, setSize] = useState(initialSize);
   const [error, setError] = useState('');
   
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    // 验证输入
-    if (size < 2 || size > 8) {
-      setError('方阵大小必须在2到8之间');
+    // 验证所有输入
+    const { width, height, depth } = size;
+    if (width < 2 || width > 8 || height < 2 || height > 8 || depth < 2 || depth > 8) {
+      setError('所有维度的大小必须在2到8之间');
       return;
     }
     
@@ -105,10 +122,13 @@ const GridSizeControl = ({ currentSize, onSizeChange, onClose }) => {
     onClose();
   };
   
-  const handleSizeChange = (e) => {
-    const value = parseInt(e.target.value, 10);
-    if (!isNaN(value)) {
-      setSize(value);
+  const handleSizeChange = (dimension, value) => {
+    const parsedValue = parseInt(value, 10);
+    if (!isNaN(parsedValue)) {
+      setSize(prev => ({
+        ...prev,
+        [dimension]: parsedValue
+      }));
       // 清除之前的错误
       setError('');
     }
@@ -119,17 +139,42 @@ const GridSizeControl = ({ currentSize, onSizeChange, onClose }) => {
       <Title>调整方阵大小</Title>
       
       <Form onSubmit={handleSubmit}>
-        <FormGroup>
-          <Label>方阵大小 (长=宽=高)</Label>
-          <Input 
-            type="number" 
-            value={size} 
-            onChange={handleSizeChange}
-            min="2"
-            max="8"
-          />
-          {error && <ErrorText>{error}</ErrorText>}
-        </FormGroup>
+        <GridFormRow>
+          <FormGroup>
+            <Label>长度 (X轴)</Label>
+            <Input 
+              type="number" 
+              value={size.width} 
+              onChange={(e) => handleSizeChange('width', e.target.value)}
+              min="2"
+              max="8"
+            />
+          </FormGroup>
+          
+          <FormGroup>
+            <Label>宽度 (Z轴)</Label>
+            <Input 
+              type="number" 
+              value={size.depth} 
+              onChange={(e) => handleSizeChange('depth', e.target.value)}
+              min="2"
+              max="8"
+            />
+          </FormGroup>
+          
+          <FormGroup>
+            <Label>高度 (Y轴)</Label>
+            <Input 
+              type="number" 
+              value={size.height} 
+              onChange={(e) => handleSizeChange('height', e.target.value)}
+              min="2"
+              max="8"
+            />
+          </FormGroup>
+        </GridFormRow>
+        
+        {error && <ErrorText>{error}</ErrorText>}
         
         <ButtonGroup>
           <Button type="button" onClick={onClose}>取消</Button>

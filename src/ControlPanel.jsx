@@ -130,6 +130,7 @@ const ControlPanel = ({
   onStartDrawPath,
   showPrompt,
   gridSize,
+  totalPoints,
   onOpenGridSizeControl
 }) => {
   const [selectingStart, setSelectingStart] = useState(false);
@@ -247,7 +248,10 @@ const ControlPanel = ({
           onClick={onOpenGridSizeControl}
           title="调整方阵的大小"
         >
-          大小({gridSize}³)
+          大小({typeof gridSize === 'object' ? 
+            `${gridSize.width}×${gridSize.height}×${gridSize.depth}` : 
+            `${gridSize}³`})
+          {totalPoints && <span style={{ fontSize: '0.8em' }}> ({totalPoints}点)</span>}
         </button>
         
         <PathInfo>{getPathInfo()}{getStartPointInfo() && <StartPointInfo>{getStartPointInfo()}</StartPointInfo>}</PathInfo>

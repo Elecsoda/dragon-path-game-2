@@ -95,6 +95,13 @@ const CancelButton = styled.button`
   }
 `;
 
+const HelpText = styled.p`
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+  margin: 10px 0;
+`;
+
 const LayerSelector = ({ onSelect, onCancel, onTempSelect, gridSize = 3 }) => {
   const [selectedLayer, setSelectedLayer] = useState(1);
   
@@ -191,6 +198,10 @@ const LayerSelector = ({ onSelect, onCancel, onTempSelect, gridSize = 3 }) => {
       <GridContainer gridSize={gridSize}>
         {renderGrid()}
       </GridContainer>
+      
+      <HelpText>
+        提示: 如果想直接在3D场景中点击选择起点，请点击取消按钮。
+      </HelpText>
       
       <ButtonRow>
         <CancelButton onClick={onCancel}>取消</CancelButton>
