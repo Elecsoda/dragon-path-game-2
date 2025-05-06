@@ -234,6 +234,13 @@ const ControlPanel = ({
             >
               随机路径
             </button>
+            <button
+              disabled={currentPath.length === 0}
+              onClick={() => onGeneratePath(false)}
+              title="尝试生成经过所有格子的完整哈密顿路径，部分起点可能无法生成"
+            >
+              完整路径
+            </button>
           </>
         )}
         
