@@ -168,6 +168,7 @@ function App() {
       return;
     }
 
+    // 传递useRandomPath参数给CubeNavigation组件
     cubeNavigationRef.current.generatePath(useRandomPath);
   };
 

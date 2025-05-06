@@ -1,5 +1,37 @@
 import * as THREE from 'three';
 
+// 简单的随机数种子实现，确保每次生成不同的路径
+if (!Math.seedrandom) {
+  Math.seedrandom = function(seed) {
+    let s = seed || Date.now().toString();
+    // 使用更复杂的随机数种子生成
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+      hash = ((hash << 5) - hash) + s.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    
+    // 替换Math.random
+    const oldRandom = Math.random;
+    const seededRandom = function() {
+      // 使用更好的随机数生成算法
+      hash = (hash * 16807) % 2147483647;
+      return (hash - 1) / 2147483646;
+    };
+    
+    // 保存原始random
+    Math.originalRandom = oldRandom;
+    // 设置新的random
+    Math.random = seededRandom;
+    
+    // 返回恢复函数，而不是使用setTimeout
+    return function() {
+      Math.random = Math.originalRandom || oldRandom;
+      delete Math.originalRandom;
+    };
+  };
+}
+
 // 检查两点是否相邻（上下左右前后）
 const areAdjacent = (point1, point2) => {
   const { x: x1, y: y1, z: z1 } = point1.index;
@@ -578,75 +610,160 @@ export const generateOptimizedHamiltonianPath = (gridPoints, startPoint, gridSiz
 
 /**
  * 生成随机路径，只允许相邻移动（上下左右前后）
+ * 改进版：更快速稳定的随机路径生成
  * @param {Array} gridPoints - 网格点列表
  * @param {Object} startPoint - 起始点
  * @returns {Array} - 随机路径
  */
 export const generateRandomPath = (gridPoints, startPoint) => {
-  if (!startPoint) return [];
+  if (!startPoint || !startPoint.index) {
+    console.error('无效的起点');
+    return startPoint ? [startPoint] : [];
+  }
   
-  // 查找起点索引
-  const startPointIndex = gridPoints.findIndex(point => 
-    point.index.x === startPoint.index.x && 
-    point.index.y === startPoint.index.y && 
-    point.index.z === startPoint.index.z
-  );
+  if (!gridPoints || !Array.isArray(gridPoints) || gridPoints.length === 0) {
+    console.error('无效的网格点数组');
+    return [startPoint];
+  }
   
-  if (startPointIndex === -1) return [];
-  
-  // 初始化路径和已访问点
-  const path = [gridPoints[startPointIndex]];
-  const visited = new Set([startPointIndex]);
-  
-  let currentPoint = gridPoints[startPointIndex];
-  let noMoreMoves = false;
-  
-  // 随机生成路径直到无法继续移动
-  while (!noMoreMoves) {
-    // 获取当前点的所有相邻点
-    const adjacentPoints = getAdjacentPoints(currentPoint, gridPoints);
+  try {
+    // 查找起点索引并进行安全检查
+    const startPointIndex = gridPoints.findIndex(point => 
+      point && point.index && 
+      point.index.x === startPoint.index.x && 
+      point.index.y === startPoint.index.y && 
+      point.index.z === startPoint.index.z
+    );
     
-    // 过滤出未访问的相邻点
-    const unvisitedAdjacentPoints = adjacentPoints.filter(p => {
-      const index = gridPoints.findIndex(gp => 
-        gp.index.x === p.index.x && 
-        gp.index.y === p.index.y && 
-        gp.index.z === p.index.z
-      );
-      return !visited.has(index);
-    });
+    if (startPointIndex === -1) {
+      console.error('在网格中未找到起点');
+      return [startPoint];
+    }
     
-    if (unvisitedAdjacentPoints.length === 0) {
+    // 使用优化的路径生成 - 使用预计算的邻接点信息
+    // 创建邻接点缓存，显著提高性能
+    const adjacencyMap = new Map();
+    
+    // 预计算并缓存所有点的邻接点
+    const getAdjacentPointsCached = (point) => {
+      if (!point || !point.index) return [];
+      
+      const key = `${point.index.x},${point.index.y},${point.index.z}`;
+      if (!adjacencyMap.has(key)) {
+        const adjacentPoints = gridPoints.filter(p => {
+          if (!p || !p.index) return false;
+          
+          const { x: x1, y: y1, z: z1 } = point.index;
+          const { x: x2, y: y2, z: z2 } = p.index;
+          
+          // 检查是否只有一个维度相差1，其他维度相同
+          const xDiff = Math.abs(x1 - x2);
+          const yDiff = Math.abs(y1 - y2);
+          const zDiff = Math.abs(z1 - z2);
+          
+          return (
+            (xDiff === 1 && yDiff === 0 && zDiff === 0) ||
+            (xDiff === 0 && yDiff === 1 && zDiff === 0) ||
+            (xDiff === 0 && yDiff === 0 && zDiff === 1)
+          );
+        });
+        
+        adjacencyMap.set(key, adjacentPoints);
+      }
+      
+      return adjacencyMap.get(key);
+    };
+    
+    // 为增加随机性，对每次随机决策使用不同的顺序
+    const getShuffledAdjacent = (point) => {
+      const adjacent = [...getAdjacentPointsCached(point)];
+      
+      // 快速随机排序
+      for (let i = adjacent.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [adjacent[i], adjacent[j]] = [adjacent[j], adjacent[i]];
+      }
+      
+      return adjacent;
+    };
+    
+    // 初始化路径和已访问点
+    const path = [gridPoints[startPointIndex]];
+    
+    // 使用高效的Set来跟踪已访问的点
+    const visitedSet = new Set();
+    const pointToKey = (point) => {
+      if (!point || !point.index) return '';
+      return `${point.index.x},${point.index.y},${point.index.z}`;
+    };
+    
+    // 标记起点为已访问
+    visitedSet.add(pointToKey(gridPoints[startPointIndex]));
+    
+    // 当前点从起点开始
+    let currentPoint = gridPoints[startPointIndex];
+    
+    // 增加算法最大迭代次数，确保算法能够充分探索
+    const maxIterations = gridPoints.length * 3; 
+    
+    // 使用快速随机遍历生成路径
+    for (let i = 0; i < maxIterations; i++) {
+      // 获取当前点的所有未访问相邻点
+      const adjacentPoints = getShuffledAdjacent(currentPoint);
+      
+      // 过滤出未访问的点
+      const unvisitedPoints = adjacentPoints.filter(p => {
+        if (!p || !p.index) return false;
+        return !visitedSet.has(pointToKey(p));
+      });
+      
       // 如果没有未访问的相邻点，结束路径生成
-      noMoreMoves = true;
-    } else {
-      // 随机选择一个未访问的相邻点
-      const randomIndex = Math.floor(Math.random() * unvisitedAdjacentPoints.length);
-      const nextPoint = unvisitedAdjacentPoints[randomIndex];
+      if (unvisitedPoints.length === 0) {
+        break;
+      }
       
-      // 添加到路径
+      // 选择第一个未访问的相邻点（已经随机洗牌过）
+      const nextPoint = unvisitedPoints[0];
+      
+      // 添加到路径并标记为已访问
       path.push(nextPoint);
-      
-      // 标记为已访问
-      const pointIndex = gridPoints.findIndex(p => 
-        p.index.x === nextPoint.index.x && 
-        p.index.y === nextPoint.index.y && 
-        p.index.z === nextPoint.index.z
-      );
-      visited.add(pointIndex);
+      visitedSet.add(pointToKey(nextPoint));
       
       // 更新当前点
       currentPoint = nextPoint;
     }
+    
+    // 验证路径的连续性
+    let isPathValid = true;
+    for (let i = 1; i < path.length; i++) {
+      if (!areAdjacent(path[i-1], path[i])) {
+        console.error(`路径在位置 ${i} 处不连续!`);
+        isPathValid = false;
+        break;
+      }
+    }
+    
+    // 如果路径无效，返回仅包含起点的路径
+    if (!isPathValid) {
+      console.warn('生成的随机路径无效，返回仅包含起点的路径');
+      return [startPoint];
+    }
+    
+    // 返回生成的有效路径
+    console.log(`成功生成随机路径，共包含 ${path.length} 个点`);
+    return path;
+    
+  } catch (error) {
+    console.error('随机路径生成过程出错:', error);
+    // 出错时返回只包含起点的路径
+    return [startPoint]; 
   }
-  
-  return path;
 };
 
 /**
  * 生成确定性的完整路径 - 蛇形遍历算法 (Snake-like pattern)
- * 该算法按照固定的模式遍历所有点，确保每次生成的路径都是相同的
- * 严格遵循哈密顿路径规则：只能上下左右前后移动到相邻格子，不能有岔路，不能走已有路线
+ * 该算法严格遵循哈密顿路径规则：只能上下左右前后移动到相邻格子，不能有岔路，不能走已有路线
+ * 增加了随机性，确保每次生成不同的路径
  * @param {Array} gridPoints - 网格点列表
  * @param {Object} startPoint - 起始点
  * @param {number} gridSize - 网格大小
@@ -655,7 +772,21 @@ export const generateRandomPath = (gridPoints, startPoint) => {
 export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 3) => {
   if (!startPoint) return [];
   
-  console.log("生成确定性的完整路径，总点数:", gridPoints.length);
+  console.log("生成哈密顿路径，总点数:", gridPoints.length);
+  
+  // 为确保随机性，使用当前时间戳作为随机种子
+  const timestamp = Date.now();
+  const randomOffset = timestamp % 1000; // 用于进一步增加随机性
+  
+  // 为增加随机性，在每次调用时随机打乱方向顺序
+  const directions = [
+    { dx: 0, dy: 1, dz: 0 },  // 上
+    { dx: 0, dy: -1, dz: 0 }, // 下
+    { dx: -1, dy: 0, dz: 0 }, // 左
+    { dx: 1, dy: 0, dz: 0 },  // 右
+    { dx: 0, dy: 0, dz: 1 },  // 前
+    { dx: 0, dy: 0, dz: -1 }  // 后
+  ].sort(() => Math.random() - 0.5);
   
   // 创建一个3D索引数组表示立方体网格
   const grid = Array(gridSize).fill().map(() => 
@@ -680,30 +811,23 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
     )
   );
   
+  // 创建路径点的集合，用于快速检查是否已在路径中
+  const pathSet = new Set();
+  const pointToKey = (x, y, z) => `${x},${y},${z}`;
+  
   // 标记起点为已访问
   visited[startPoint.index.x][startPoint.index.y][startPoint.index.z] = true;
+  pathSet.add(pointToKey(startPoint.index.x, startPoint.index.y, startPoint.index.z));
   
   // 当前位置是起点
   let current = { ...startPoint.index };
-  
-  // 寻找下一个点的方向：上、下、左、右、前、后
-  const directions = [
-    { dx: 0, dy: 1, dz: 0 }, // 上
-    { dx: 0, dy: -1, dz: 0 }, // 下
-    { dx: -1, dy: 0, dz: 0 }, // 左
-    { dx: 1, dy: 0, dz: 0 }, // 右
-    { dx: 0, dy: 0, dz: 1 }, // 前
-    { dx: 0, dy: 0, dz: -1 }  // 后
-  ];
-  
-  // 使用固定模式生成路径（逐层蛇形）
   
   // 对于2x2x2及以下的小网格，使用简单的DFS算法
   if (gridSize <= 2) {
     const remainingPoints = gridSize * gridSize * gridSize - 1; // 减去起点
     hamiltonianDFS(current, remainingPoints);
   } else {
-    // 对于大型网格，使用预设的蛇形模式
+    // 对于大型网格，使用预设的蛇形模式，但加入随机因素
     generateSnakePath();
   }
   
@@ -734,16 +858,28 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
     }
   }
   
-  // 验证路径的连续性
-  for (let i = 1; i < path.length; i++) {
-    const prev = path[i-1].index;
-    const curr = path[i].index;
+  // 验证路径的连续性和无重复
+  const pathPointsSet = new Set();
+  for (let i = 0; i < path.length; i++) {
+    const pointKey = pointToKey(path[i].index.x, path[i].index.y, path[i].index.z);
     
-    // 计算两点之间的曼哈顿距离
-    const dist = Math.abs(prev.x - curr.x) + Math.abs(prev.y - curr.y) + Math.abs(prev.z - curr.z);
+    // 检查路径中是否有重复的点
+    if (pathPointsSet.has(pointKey)) {
+      console.error(`路径中有重复点: (${path[i].index.x},${path[i].index.y},${path[i].index.z}) 在位置 ${i}`);
+    }
+    pathPointsSet.add(pointKey);
     
-    if (dist !== 1) {
-      console.error(`路径在位置 ${i} 处不连续! 点 (${prev.x},${prev.y},${prev.z}) 和点 (${curr.x},${curr.y},${curr.z}) 之间的曼哈顿距离为 ${dist}`);
+    // 检查相邻点的连续性
+    if (i > 0) {
+      const prev = path[i-1].index;
+      const curr = path[i].index;
+      
+      // 计算两点之间的曼哈顿距离
+      const dist = Math.abs(prev.x - curr.x) + Math.abs(prev.y - curr.y) + Math.abs(prev.z - curr.z);
+      
+      if (dist !== 1) {
+        console.error(`路径在位置 ${i} 处不连续! 点 (${prev.x},${prev.y},${prev.z}) 和点 (${curr.x},${curr.y},${curr.z}) 之间的曼哈顿距离为 ${dist}`);
+      }
     }
   }
   
@@ -756,11 +892,11 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
       return true;
     }
     
-    // 随机排序方向，以增加成功率和随机性
-    const shuffledDirections = [...directions].sort(() => Math.random() - 0.5);
+    // 创建方向的随机副本，使用不同的随机种子
+    const randomDirections = [...directions].sort(() => Math.random() - 0.5);
     
     // 尝试每个方向
-    for (const dir of shuffledDirections) {
+    for (const dir of randomDirections) {
       const nextX = pos.x + dir.dx;
       const nextY = pos.y + dir.dy;
       const nextZ = pos.z + dir.dz;
@@ -775,6 +911,7 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
         const nextPoint = grid[nextX][nextY][nextZ];
         visited[nextX][nextY][nextZ] = true;
         path.push(nextPoint);
+        pathSet.add(pointToKey(nextX, nextY, nextZ));
         
         // 继续DFS
         if (hamiltonianDFS({ x: nextX, y: nextY, z: nextZ }, remaining - 1)) {
@@ -784,6 +921,7 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
         // 回溯
         path.pop();
         visited[nextX][nextY][nextZ] = false;
+        pathSet.delete(pointToKey(nextX, nextY, nextZ));
       }
     }
     
@@ -792,16 +930,30 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
   
   // 使用预设蛇形模式生成路径（适用于大型网格）
   function generateSnakePath() {
-    // 先处理Z=0层的所有XY平面
-    processXYPlane(0);
+    // 根据随机偏移选择起始遍历方向（增加随机性）
+    const startZDirection = randomOffset % 2 === 0 ? 1 : -1;
+    const startZ = startZDirection > 0 ? 0 : gridSize - 1;
     
-    // 然后处理其余Z层
-    for (let z = 1; z < gridSize; z++) {
-      // 找到一个从前一层到当前层的连接点
-      connectToNextLayer(z);
-      
-      // 处理当前Z层
-      processXYPlane(z);
+    // 先处理第一个XY平面
+    processXYPlane(startZ);
+    
+    // 然后处理其余Z层，顺序根据随机因素决定
+    if (startZDirection > 0) {
+      for (let z = 1; z < gridSize; z++) {
+        // 找到一个从前一层到当前层的连接点
+        connectToNextLayer(z);
+        
+        // 处理当前Z层
+        processXYPlane(z);
+      }
+    } else {
+      for (let z = gridSize - 2; z >= 0; z--) {
+        // 找到一个从前一层到当前层的连接点
+        connectToNextLayer(z);
+        
+        // 处理当前Z层
+        processXYPlane(z);
+      }
     }
   }
   
@@ -814,8 +966,14 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
     // 确保当前点已访问
     visited[x][y][z] = true;
     
+    // 随机决定是否反转行的处理顺序
+    const reverseRows = (randomOffset + z) % 2 === 0;
+    
     // 对每一行进行蛇形遍历
-    for (let currY = 0; currY < gridSize; currY++) {
+    const rows = Array.from({length: gridSize}, (_, i) => i);
+    if (reverseRows) rows.reverse();
+    
+    for (const currY of rows) {
       // 跳过当前所在行
       if (currY === y) {
         // 处理当前行的剩余部分
@@ -830,8 +988,8 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
         x = current.x;
         y = current.y;
         
-        // 处理新行
-        if (y % 2 === 0) {
+        // 处理新行，奇偶行方向交替
+        if ((currY + (reverseRows ? 1 : 0)) % 2 === 0) {
           // 偶数行从左到右
           processRowLeftToRight(y, z);
         } else {
@@ -889,11 +1047,24 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
   
   // 尝试移动到指定位置
   function tryMove(x, y, z) {
+    // 首先确认目标位置未被访问
+    if (visited[x][y][z]) {
+      return false;
+    }
+    
     // 检查是否可以从当前位置移动到目标位置
     if (areAdjacentIndices(current.x, current.y, current.z, x, y, z)) {
       const nextPoint = grid[x][y][z];
+      
+      // 确保不重复访问点
+      const pointKey = pointToKey(x, y, z);
+      if (pathSet.has(pointKey)) {
+        return false;
+      }
+      
       path.push(nextPoint);
       visited[x][y][z] = true;
+      pathSet.add(pointKey);
       current = { x, y, z };
       return true;
     }
@@ -903,8 +1074,15 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
     if (intermediatePoints.length > 0) {
       // 沿着路径移动
       for (const point of intermediatePoints) {
+        // 确保不重复访问点
+        const pointKey = pointToKey(point.x, point.y, point.z);
+        if (pathSet.has(pointKey)) {
+          return false;
+        }
+        
         path.push(grid[point.x][point.y][point.z]);
         visited[point.x][point.y][point.z] = true;
+        pathSet.add(pointKey);
       }
       current = { x, y, z };
       return true;
@@ -917,23 +1095,26 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
   function findPathTo(targetX, targetY, targetZ) {
     // 使用广度优先搜索找最短路径
     const queue = [{ x: current.x, y: current.y, z: current.z, path: [] }];
-    const visitedInSearch = new Set([`${current.x},${current.y},${current.z}`]);
+    const visitedInSearch = new Set([pointToKey(current.x, current.y, current.z)]);
     
     while (queue.length > 0) {
       const { x, y, z, path } = queue.shift();
       
+      // 随机化方向数组以增加多样性
+      const searchDirections = [...directions].sort(() => Math.random() - 0.5);
+      
       // 检查每个方向
-      for (const dir of directions) {
+      for (const dir of searchDirections) {
         const nx = x + dir.dx;
         const ny = y + dir.dy;
         const nz = z + dir.dz;
         
-        // 检查是否在网格内且未访问
+        // 检查是否在网格内且未访问(既未在全局visited中，也未在本次搜索中访问过)
         if (nx >= 0 && nx < gridSize && 
             ny >= 0 && ny < gridSize && 
             nz >= 0 && nz < gridSize) {
           
-          const key = `${nx},${ny},${nz}`;
+          const key = pointToKey(nx, ny, nz);
           
           // 找到目标
           if (nx === targetX && ny === targetY && nz === targetZ) {
@@ -966,21 +1147,27 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
       }
     }
     
+    // 根据随机因素决定起始位置
+    const startX = (randomOffset + targetY) % 2 === 0 ? 0 : gridSize - 1;
+    
     // 尝试寻找路径
-    const x = targetY % 2 === 0 ? 0 : gridSize - 1; // 根据行号确定起始位置
-    return tryMove(x, targetY, z);
+    return tryMove(startX, targetY, z);
   }
   
   // 连接到下一层
   function connectToNextLayer(z) {
-    // 尝试直接向上移动
+    // 尝试直接向上/下移动
     if (tryMove(current.x, current.y, z)) {
       return true;
     }
     
-    // 如果不能直接移动，尝试找到可以移动的点
-    for (let x = 0; x < gridSize; x++) {
-      for (let y = 0; y < gridSize; y++) {
+    // 如果不能直接移动，随机尝试其他位置
+    const xCoords = Array.from({length: gridSize}, (_, i) => i).sort(() => Math.random() - 0.5);
+    const yCoords = Array.from({length: gridSize}, (_, i) => i).sort(() => Math.random() - 0.5);
+    
+    // 首先尝试与当前点相邻的点
+    for (const x of xCoords) {
+      for (const y of yCoords) {
         if (areAdjacentIndices(current.x, current.y, current.z, x, y, z) && !visited[x][y][z]) {
           if (tryMove(x, y, z)) {
             return true;
@@ -989,9 +1176,9 @@ export const generateFixedHamiltonianPath = (gridPoints, startPoint, gridSize = 
       }
     }
     
-    // 如果仍然找不到，使用广度优先搜索
-    for (let x = 0; x < gridSize; x++) {
-      for (let y = 0; y < gridSize; y++) {
+    // 如果仍然找不到，尝试任何未访问的点
+    for (const x of xCoords) {
+      for (const y of yCoords) {
         if (!visited[x][y][z]) {
           if (tryMove(x, y, z)) {
             return true;
@@ -1018,6 +1205,179 @@ function areAdjacentIndices(x1, y1, z1, x2, y2, z2) {
 }
 
 /**
+ * 检查是否可以生成哈密顿路径
+ * 使用染色法判断：3D网格被染成红白两色，相邻块不同色
+ * 如果红色块数量等于白色块数量，则任意点可作为起点
+ * 如果红白块数量不等，则块数较少的颜色点不能作为起点
+ * @param {Object|number} gridSize - 网格大小，可以是数字或者包含width、height、depth的对象
+ * @param {Object} startPoint - 起始点
+ * @returns {Object} - {canGenerate: 是否可以生成, message: 消息, colorCount: 染色统计}
+ */
+export const checkHamiltonianPathPossibility = (gridSize, startPoint) => {
+  if (!startPoint) {
+    return { canGenerate: false, message: '未提供起点，无法判断' };
+  }
+  
+  // 处理gridSize可能是对象或数字的情况
+  const width = typeof gridSize === 'object' ? gridSize.width : gridSize;
+  const height = typeof gridSize === 'object' ? gridSize.height : gridSize;
+  const depth = typeof gridSize === 'object' ? gridSize.depth : gridSize;
+  
+  // 检查起点是否在网格范围内
+  const { x, y, z } = startPoint.index;
+  if (x < 0 || x >= width || y < 0 || y >= height || z < 0 || z >= depth) {
+    return { 
+      canGenerate: false, 
+      message: '起点超出网格范围，无法生成路径' 
+    };
+  }
+  
+  // 总点数
+  const totalPoints = width * height * depth;
+  
+  // 特殊情况：当宽、高、深中有任意一个维度为1，且另一个维度为奇数时，不可能生成哈密顿路径
+  if ((width === 1 && (height % 2 === 1 || depth % 2 === 1)) ||
+      (height === 1 && (width % 2 === 1 || depth % 2 === 1)) ||
+      (depth === 1 && (width % 2 === 1 || height % 2 === 1))) {
+    return { 
+      canGenerate: false, 
+      message: '当前网格尺寸配置无法生成完整哈密顿路径' 
+    };
+  }
+  
+  // 进行3D棋盘式染色 (红白交替)
+  const colorGrid = {};
+  let redCount = 0;
+  let whiteCount = 0;
+  
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < height; y++) {
+      for (let z = 0; z < depth; z++) {
+        // 奇偶染色法：x+y+z的奇偶性决定颜色
+        const isRed = (x + y + z) % 2 === 0;
+        const key = `${x}-${y}-${z}`;
+        colorGrid[key] = isRed ? 'red' : 'white';
+        
+        if (isRed) {
+          redCount++;
+        } else {
+          whiteCount++;
+        }
+      }
+    }
+  }
+  
+  // 检查起点颜色
+  const startKey = `${x}-${y}-${z}`;
+  const startColor = colorGrid[startKey];
+  
+  // 如果红白块数相等，则可以从任意点开始
+  if (redCount === whiteCount) {
+    return { 
+      canGenerate: true, 
+      message: '可以生成完整的哈密顿路径，所有点都可以作为起点', 
+      colorCount: { red: redCount, white: whiteCount },
+      startColor
+    };
+  }
+  
+  // 如果红白块数不等，检查起点是否属于数量较多的颜色
+  const majorColor = redCount > whiteCount ? 'red' : 'white';
+  const minorColor = redCount > whiteCount ? 'white' : 'red';
+  const majorCount = Math.max(redCount, whiteCount);
+  const minorCount = Math.min(redCount, whiteCount);
+  
+  if (startColor === majorColor) {
+    return { 
+      canGenerate: true, 
+      message: `可以生成完整的哈密顿路径，但只有${majorColor}色点可以作为起点`, 
+      colorCount: { red: redCount, white: whiteCount },
+      startColor
+    };
+  } else {
+    return { 
+      canGenerate: false, 
+      message: `无法生成完整的哈密顿路径，${minorColor}色点不能作为起点，请选择${majorColor}色点作为起点`, 
+      colorCount: { red: redCount, white: whiteCount },
+      startColor
+    };
+  }
+};
+
+/**
+ * 生成完整的哈密顿路径（确保访问所有点）
+ * 结合了现有的路径生成算法，但会先判断是否可能生成哈密顿路径
+ * @param {Array} gridPoints - 网格点列表
+ * @param {Object} startPoint - 起始点
+ * @param {Object|number} gridSize - 网格大小
+ * @returns {Object} - {path: 生成的路径, pathInfo: 路径信息}
+ */
+export const generateCompleteHamiltonPath = (gridPoints, startPoint, gridSize = 3) => {
+  // 首先检查是否可以生成哈密顿路径
+  const pathPossibility = checkHamiltonianPathPossibility(gridSize, startPoint);
+  
+  if (!pathPossibility.canGenerate) {
+    // 如果不能生成完整路径，返回信息和包含起点的路径
+    return { 
+      path: [startPoint], 
+      pathInfo: pathPossibility 
+    };
+  }
+  
+  // 可以生成完整路径，使用现有的路径生成算法
+  try {
+    // 对于非立方体的网格，可能需要特殊处理
+    // 如果长宽高不同，我们使用最大边长作为gridSize参数传递给路径生成算法
+    const uniformGridSize = typeof gridSize === 'object' 
+      ? Math.max(gridSize.width, gridSize.height, gridSize.depth)
+      : gridSize;
+    
+    // 尝试生成固定哈密顿路径
+    const path = generateFixedHamiltonianPath(gridPoints, startPoint, uniformGridSize);
+    
+    // 检查生成的路径是否完整（包含所有点）
+    const totalPoints = typeof gridSize === 'object' 
+      ? gridSize.width * gridSize.height * gridSize.depth 
+      : Math.pow(gridSize, 3);
+    
+    if (path.length === totalPoints) {
+      return { 
+        path, 
+        pathInfo: { 
+          ...pathPossibility,
+          message: `成功生成完整哈密顿路径，共${path.length}个点`
+        } 
+      };
+    } else {
+      // 如果生成的路径不完整，尝试使用备选算法
+      console.log(`固定算法生成的路径不完整，尝试使用备选算法`);
+      // 使用优化的哈密顿路径算法作为备选，而不是递归调用自身
+      const alternativePath = generateOptimizedHamiltonianPath(gridPoints, startPoint, uniformGridSize);
+      
+      // 返回生成的路径（可能是部分路径）
+      return { 
+        path: path.length >= alternativePath.length ? path : alternativePath, 
+        pathInfo: { 
+          ...pathPossibility,
+          message: `生成了部分路径，共${Math.max(path.length, alternativePath.length)}/${totalPoints}个点`
+        } 
+      };
+    }
+  } catch (error) {
+    console.error('哈密顿路径生成出错:', error);
+    // 出错时，返回只包含起点的路径
+    return { 
+      path: [startPoint], 
+      pathInfo: { 
+        ...pathPossibility,
+        canGenerate: false,
+        message: '路径生成算法出错，请尝试其他起点'
+      } 
+    };
+  }
+};
+
+/**
  * 生成路径 - 外部接口
  * @param {Array} gridPoints - 网格点列表
  * @param {Object} startPoint - 起始点
@@ -1025,31 +1385,107 @@ function areAdjacentIndices(x1, y1, z1, x2, y2, z2) {
  * @param {Object|number} gridSize - 网格大小，可以是数字或者包含width、height、depth的对象
  * @returns {Array} - 生成的路径
  */
-export const generatePath = (gridPoints, startPoint, useRandomPath = false, gridSize = 3) => {
+export const generatePath = (gridPoints, startPoint, useRandomPath = false, gridSize = 3, recursionCount = 0) => {
   if (!startPoint) {
     console.error('未提供起点，无法生成路径');
     return [];
   }
   
+  // 防止无限递归
+  if (recursionCount > 3) {
+    console.warn('尝试生成路径次数过多，返回现有路径');
+    return [startPoint];
+  }
+  
   console.log('开始生成路径，使用随机模式:', useRandomPath, '网格大小:', gridSize);
   
   try {
-    if (useRandomPath) {
-      // 随机路径模式
-      return generateRandomPath(gridPoints, startPoint);
-    } else {
-      // 完整路径模式 - 使用确定性的路径生成算法
-      // 对于非立方体的网格，可能需要特殊处理
-      // 如果长宽高不同，我们使用最大边长作为gridSize参数传递给路径生成算法
-      const uniformGridSize = typeof gridSize === 'object' 
-        ? Math.max(gridSize.width, gridSize.height, gridSize.depth)
-        : gridSize;
-      
-      return generateFixedHamiltonianPath(gridPoints, startPoint, uniformGridSize);
+    // 使用当前时间戳作为随机种子，确保每次生成不同的路径
+    const randomSeed = Date.now() + Math.floor(Math.random() * 1000000) + recursionCount;
+    // 保存用于恢复随机数生成器的函数
+    let restoreRandom = null;
+    
+    // 应用随机数种子
+    if (typeof Math.seedrandom === 'function') {
+      restoreRandom = Math.seedrandom(randomSeed.toString());
+      console.log('使用随机种子:', randomSeed);
     }
+    
+    let path = [];
+    
+    if (useRandomPath) {
+      try {
+        // 随机路径模式 - 使用优化的随机路径生成算法
+        path = generateRandomPath(gridPoints, startPoint);
+        
+        // 验证路径有效性
+        if (!path || path.length <= 1) {
+          console.warn('随机路径生成结果无效，尝试再次生成');
+          
+          // 恢复随机数生成器
+          if (restoreRandom) restoreRandom();
+          
+          // 递归尝试，使用新的随机种子
+          return generatePath(gridPoints, startPoint, useRandomPath, gridSize, recursionCount + 1);
+        }
+      } catch (error) {
+        console.error('随机路径生成出错:', error);
+        // 恢复随机数生成器
+        if (restoreRandom) restoreRandom();
+        return [startPoint]; // 出错时返回只包含起点的路径
+      }
+    } else {
+      // 完整路径模式 - 尝试生成哈密顿路径
+      const result = generateCompleteHamiltonPath(gridPoints, startPoint, gridSize);
+      path = result.path;
+      
+      // 计算总点数
+      const totalPoints = typeof gridSize === 'object' 
+        ? gridSize.width * gridSize.height * gridSize.depth 
+        : Math.pow(gridSize, 3);
+      
+      // 验证路径是否有重复点，如果有则重新生成
+      const pathPoints = new Set();
+      let hasRepeats = false;
+      
+      for (const point of path) {
+        const key = `${point.index.x},${point.index.y},${point.index.z}`;
+        if (pathPoints.has(key)) {
+          hasRepeats = true;
+          console.error(`生成的路径中存在重复点: ${key}`);
+          break;
+        }
+        pathPoints.add(key);
+      }
+      
+      if (hasRepeats) {
+        console.warn('路径中存在重复点，尝试重新生成');
+        // 恢复随机数生成器
+        if (restoreRandom) restoreRandom();
+        // 调整随机种子，重新生成路径
+        return generatePath(gridPoints, startPoint, useRandomPath, gridSize, recursionCount + 1);
+      }
+      
+      // 只在无法生成哈密顿路径时提示用户
+      if (!result.pathInfo.canGenerate) {
+        console.warn(result.pathInfo.message);
+        alert("此起点无法生成完整路径");
+      } else if (path.length < totalPoints) {
+        // 路径不完整但理论上可以生成完整路径，打印警告但不提示用户
+        console.warn(`生成的路径不完整：${path.length}/${totalPoints}`);
+      } else {
+        console.log(`成功生成完整哈密顿路径，覆盖所有${totalPoints}个格子`);
+      }
+    }
+    
+    // 恢复随机数生成器
+    if (restoreRandom) restoreRandom();
+    
+    return path;
   } catch (error) {
     console.error('路径生成出错:', error);
     // 出错时，尝试返回一个只包含起点的路径
+    alert('路径生成过程中发生错误，请尝试其他起点或使用随机路径模式。');
     return [startPoint];
   }
 };

@@ -17,12 +17,12 @@ const disabledColor = 0xAAAAAA; // 灰色
 
 // 箭头位置定义 - 进一步增加距离，避免与立方体重合
 const arrowPositions = {
-  'x+': new THREE.Vector3(4.5, 0, 0),   // 右侧
-  'x-': new THREE.Vector3(-4.5, 0, 0),  // 左侧
-  'y+': new THREE.Vector3(0, 4.5, 0),   // 上方
-  'y-': new THREE.Vector3(0, -4.5, 0),  // 下方
-  'z+': new THREE.Vector3(0, 0, 4.5),   // 前方
-  'z-': new THREE.Vector3(0, 0, -4.5)   // 后方
+  'x+': new THREE.Vector3(4, 0, 0),   // 右侧
+  'x-': new THREE.Vector3(-4, 0, 0),  // 左侧
+  'y+': new THREE.Vector3(0, 4, 0),   // 上方
+  'y-': new THREE.Vector3(0, -4, 0),  // 下方
+  'z+': new THREE.Vector3(0, 0, 4),   // 前方
+  'z-': new THREE.Vector3(0, 0, -4)   // 后方
 };
 
 // 箭头方向定义

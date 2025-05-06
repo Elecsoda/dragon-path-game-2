@@ -365,9 +365,9 @@ const CubeNavigation = forwardRef((props, ref) => {
         handleAddPoint(clickedPoint);
       }
     } else {
-      // 自动模式下，点击任何点都视为选择新起点
-      event.stopPropagation();
-      handleNewStartPoint(clickedPoint);
+      // 自动模式下，只有在选择起点模式下才允许点击
+      // 无需处理这种情况，因为只有selectingStartPoint为true时才能选择起点
+      // 其他情况下什么也不做
     }
   };
 
@@ -471,32 +471,74 @@ const CubeNavigation = forwardRef((props, ref) => {
     setCurrentAnimationStep(0);
 
     // 计算所有点数量
-    const totalPoints = gridSize * gridSize * gridSize;
+    const totalPoints = typeof gridSize === 'object' 
+      ? gridSize.width * gridSize.height * gridSize.depth 
+      : Math.pow(gridSize, 3);
 
-    // 使用路径生成算法
-    setTimeout(() => {
-      // 使用路径生成函数，强制使用随机路径，传入gridSize参数
-      const path = generatePath(
-        gridPoints.current,
-        startPoint,
-        true, // 始终使用随机路径
-        gridSize
-      );
+    // 使用路径生成算法，使用请求动画帧确保UI不会被阻塞
+    requestAnimationFrame(() => {
+      try {
+        // 使用路径生成函数，根据useRandomPath参数决定路径生成模式
+        let path = [];
+        
+        // 使用更可靠的错误处理
+        try {
+          path = generatePath(
+            gridPoints.current,
+            startPoint,
+            useRandomPath,
+            gridSize
+          );
+        } catch (error) {
+          console.error("路径生成出错:", error);
+          // 确保至少有一个点（起点）
+          path = [startPoint];
+        }
+        
+        // 验证生成的路径
+        if (!path || !Array.isArray(path) || path.length === 0) {
+          console.error("生成的路径无效");
+          path = [startPoint]; // 确保至少有起点
+        }
 
-      if (path && path.length > 0) {
         // 提示生成的路径长度
         console.log(`生成了包含 ${path.length}/${totalPoints} 个点的路径`);
+
+        // 如果是随机路径且只有起点，重试一次（可能是生成失败）
+        if (useRandomPath && path.length <= 1 && gridPoints.current.length > 1) {
+          console.warn("随机路径生成不正常，只返回了起点，尝试重新生成");
+          
+          // 重新尝试一次生成随机路径
+          setTimeout(() => {
+            try {
+              const retryPath = generateRandomPath(gridPoints.current, startPoint);
+              if (retryPath && retryPath.length > 1) {
+                console.log(`重试成功，生成了包含 ${retryPath.length}/${totalPoints} 个点的路径`);
+                setGeneratedPath(retryPath);
+                animatePathGeneration(retryPath);
+                return;
+              }
+            } catch (error) {
+              console.error("重试生成随机路径出错:", error);
+            }
+            
+            // 如果重试仍然失败，显示当前路径
+            setGeneratedPath(path);
+            animatePathGeneration(path);
+          }, 100);
+          return;
+        }
 
         // 设置生成的路径
         setGeneratedPath(path);
 
         // 开始路径动画展示
         animatePathGeneration(path);
-      } else {
+      } catch (error) {
+        console.error("处理路径生成过程中出错:", error);
         setGeneratingPath(false);
-        console.error("路径生成失败");
       }
-    }, 10);
+    });
   };
 
   // 添加animatePathGeneration函数
@@ -513,39 +555,51 @@ const CubeNavigation = forwardRef((props, ref) => {
 
     // 设置当前动画步骤
     setCurrentAnimationStep(1);
-
-    // 开始路径生成动画
-    const timerId = setInterval(() => {
-      setCurrentAnimationStep((prevStep) => {
-        if (prevStep >= path.length) {
-          clearInterval(timerId);
-          setGeneratingPath(false);
-
-          // 完成路径生成动画后，更新路径
-          onPathUpdate(path);
-          updatePathLine(path);
-
-          // 创建动画控制器
-          pathAnimation.current = createPathAnimation(
-            path,
-            handleAnimationStep,
-            handleAnimationComplete,
-            0.02
-          );
-
-          return prevStep;
-        }
-
-        // 逐步更新生成的路径显示
-        const currentVisiblePath = path.slice(0, prevStep + 1);
-        setGeneratedPath(currentVisiblePath);
-        updatePathLine(currentVisiblePath);
-
-        return prevStep + 1;
-      });
-    }, 30); // 路径生成动画，每30毫秒一步
-
-    setPathAnimationTimer(timerId);
+    
+    // 计算合适的动画步进时间 - 对于更长的路径，速度更快
+    const animationSpeed = Math.max(5, Math.min(30, 200 / path.length));
+    
+    // 使用更高效的动画方法
+    let step = 1;
+    const animateStep = () => {
+      // 检查是否已完成
+      if (step >= path.length) {
+        setGeneratingPath(false);
+        
+        // 完成路径生成动画后，更新路径
+        onPathUpdate(path);
+        updatePathLine(path);
+        
+        // 创建动画控制器
+        pathAnimation.current = createPathAnimation(
+          path,
+          handleAnimationStep,
+          handleAnimationComplete,
+          0.02
+        );
+        
+        return;
+      }
+      
+      // 逐步更新生成的路径显示
+      const currentVisiblePath = path.slice(0, step + 1);
+      setGeneratedPath(currentVisiblePath);
+      updatePathLine(currentVisiblePath);
+      
+      // 递增步骤
+      step++;
+      
+      // 请求下一帧
+      const timerId = setTimeout(() => {
+        requestAnimationFrame(animateStep);
+      }, animationSpeed);
+      
+      // 保存定时器ID以便清理
+      setPathAnimationTimer(timerId);
+    };
+    
+    // 开始动画
+    requestAnimationFrame(animateStep);
   };
 
   // 清理定时器
@@ -760,17 +814,44 @@ const CubeNavigation = forwardRef((props, ref) => {
     }
   };
 
-  // 对外暴露组件API
+  // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
-    generatePath: handleGeneratePath,
-    startAnimation: startPathAnimation,
-    pauseAnimation: pausePathAnimation,
-    resumeAnimation: resumePathAnimation,
-    stopAnimation: stopPathAnimation,
-    undoLastStep: undoLastStep,
-    resetPath: resetPath,
-    startDrawPath: startDrawPath,
-    setNewStartPoint: handleNewStartPoint,
+    // 生成路径
+    generatePath: (useRandomPath = true) => {
+      handleGeneratePath(useRandomPath);
+    },
+    // 开始动画
+    startAnimation: () => {
+      startPathAnimation();
+    },
+    // 暂停动画
+    pauseAnimation: () => {
+      pausePathAnimation();
+    },
+    // 恢复动画
+    resumeAnimation: () => {
+      resumePathAnimation();
+    },
+    // 停止动画
+    stopAnimation: () => {
+      stopPathAnimation();
+    },
+    // 撤回上一步
+    undoLastStep: () => {
+      undoLastStep();
+    },
+    // 重置路径
+    resetPath: () => {
+      resetPath();
+    },
+    // 设置新起点
+    setNewStartPoint: (point) => {
+      handleNewStartPoint(point);
+    },
+    // 开始绘制路径
+    startDrawPath: () => {
+      startDrawPath();
+    }
   }));
 
   // 在每一帧更新动画
