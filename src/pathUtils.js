@@ -610,7 +610,7 @@ export const generateOptimizedHamiltonianPath = (gridPoints, startPoint, gridSiz
 
 /**
  * 生成随机路径，只允许相邻移动（上下左右前后）
- * 改进版：更快速稳定的随机路径生成
+ * 改进版：更快速稳定的随机路径生成，增加回溯功能防止路径中断
  * @param {Array} gridPoints - 网格点列表
  * @param {Object} startPoint - 起始点
  * @returns {Array} - 随机路径
@@ -687,9 +687,6 @@ export const generateRandomPath = (gridPoints, startPoint) => {
       return adjacent;
     };
     
-    // 初始化路径和已访问点
-    const path = [gridPoints[startPointIndex]];
-    
     // 使用高效的Set来跟踪已访问的点
     const visitedSet = new Set();
     const pointToKey = (point) => {
@@ -697,40 +694,129 @@ export const generateRandomPath = (gridPoints, startPoint) => {
       return `${point.index.x},${point.index.y},${point.index.z}`;
     };
     
-    // 标记起点为已访问
-    visitedSet.add(pointToKey(gridPoints[startPointIndex]));
+    // 初始化路径
+    const finalPath = [];
     
-    // 当前点从起点开始
-    let currentPoint = gridPoints[startPointIndex];
-    
-    // 增加算法最大迭代次数，确保算法能够充分探索
-    const maxIterations = gridPoints.length * 3; 
-    
-    // 使用快速随机遍历生成路径
-    for (let i = 0; i < maxIterations; i++) {
-      // 获取当前点的所有未访问相邻点
-      const adjacentPoints = getShuffledAdjacent(currentPoint);
+    // 使用回溯算法生成路径，避免中途断开
+    const dfs = (currentPoint, path, visited) => {
+      // 添加当前点到路径
+      path.push(currentPoint);
+      const currentKey = pointToKey(currentPoint);
+      visited.add(currentKey);
       
-      // 过滤出未访问的点
-      const unvisitedPoints = adjacentPoints.filter(p => {
-        if (!p || !p.index) return false;
-        return !visitedSet.has(pointToKey(p));
-      });
-      
-      // 如果没有未访问的相邻点，结束路径生成
-      if (unvisitedPoints.length === 0) {
-        break;
+      // 如果所有点都已访问，返回true
+      if (visited.size === gridPoints.length) {
+        return true;
       }
       
-      // 选择第一个未访问的相邻点（已经随机洗牌过）
-      const nextPoint = unvisitedPoints[0];
+      // 获取当前点的所有未访问相邻点（随机顺序）
+      const adjacentPoints = getShuffledAdjacent(currentPoint);
+      const unvisitedPoints = adjacentPoints.filter(p => !visited.has(pointToKey(p)));
       
-      // 添加到路径并标记为已访问
-      path.push(nextPoint);
-      visitedSet.add(pointToKey(nextPoint));
+      // 如果没有未访问的相邻点，但仍有未访问的点，这是一个死胡同
+      if (unvisitedPoints.length === 0) {
+        // 尝试查找一个可以到达未访问点的已访问点
+        if (visited.size < gridPoints.length) {
+          return false; // 回溯
+        }
+        return true; // 所有点都已访问
+      }
       
-      // 更新当前点
-      currentPoint = nextPoint;
+      // 尝试每个未访问的相邻点
+      for (const nextPoint of unvisitedPoints) {
+        if (dfs(nextPoint, path, new Set(visited))) {
+          return true;
+        }
+      }
+      
+      // 如果所有未访问相邻点都无法完成路径，回溯
+      path.pop();
+      visited.delete(currentKey);
+      return false;
+    };
+    
+    // 使用贪婪算法生成随机路径
+    const generateGreedyPath = () => {
+      const path = [gridPoints[startPointIndex]];
+      const visited = new Set([pointToKey(gridPoints[startPointIndex])]);
+      let currentPoint = gridPoints[startPointIndex];
+      
+      // 最大迭代次数，避免无限循环
+      const maxIterations = gridPoints.length * 3;
+      
+      for (let i = 0; i < maxIterations; i++) {
+        // 获取当前点的所有未访问相邻点
+        const adjacentPoints = getShuffledAdjacent(currentPoint);
+        const unvisitedPoints = adjacentPoints.filter(p => !visited.has(pointToKey(p)));
+        
+        // 如果没有未访问的相邻点，结束路径生成
+        if (unvisitedPoints.length === 0) {
+          break;
+        }
+        
+        // 选择第一个未访问的相邻点（已经随机洗牌过）
+        const nextPoint = unvisitedPoints[0];
+        
+        // 添加到路径并标记为已访问
+        path.push(nextPoint);
+        visited.add(pointToKey(nextPoint));
+        
+        // 更新当前点
+        currentPoint = nextPoint;
+      }
+      
+      return path;
+    };
+    
+    // 先尝试使用贪婪算法生成路径
+    let path = generateGreedyPath();
+    
+    // 如果贪婪算法生成的路径太短（少于总点数的70%），尝试使用回溯算法
+    if (path.length < gridPoints.length * 0.7) {
+      console.log('贪婪算法生成的路径太短，尝试使用回溯算法');
+      
+      // 使用回溯算法尝试生成更长的路径
+      const backtrackPath = [];
+      const startVisited = new Set();
+      
+      // 限制回溯的最大深度，避免栈溢出
+      const maxDepth = Math.min(gridPoints.length, 100);
+      const depthLimitedDFS = (currentPoint, depth = 0) => {
+        if (depth >= maxDepth) return false;
+        
+        backtrackPath.push(currentPoint);
+        const currentKey = pointToKey(currentPoint);
+        startVisited.add(currentKey);
+        
+        // 获取当前点的所有未访问相邻点（随机顺序）
+        const adjacentPoints = getShuffledAdjacent(currentPoint);
+        const unvisitedPoints = adjacentPoints.filter(p => !startVisited.has(pointToKey(p)));
+        
+        // 如果没有未访问的相邻点或达到所有点
+        if (unvisitedPoints.length === 0 || startVisited.size === gridPoints.length) {
+          return true;
+        }
+        
+        // 尝试每个未访问的相邻点
+        for (const nextPoint of unvisitedPoints) {
+          if (depthLimitedDFS(nextPoint, depth + 1)) {
+            return true;
+          }
+        }
+        
+        // 如果所有未访问相邻点都无法完成路径，回溯
+        backtrackPath.pop();
+        startVisited.delete(currentKey);
+        return false;
+      };
+      
+      // 尝试回溯算法
+      depthLimitedDFS(gridPoints[startPointIndex]);
+      
+      // 如果回溯算法生成的路径更长，使用它
+      if (backtrackPath.length > path.length) {
+        path = backtrackPath;
+      }
     }
     
     // 验证路径的连续性
@@ -1416,7 +1502,34 @@ export const generatePath = (gridPoints, startPoint, useRandomPath = false, grid
     if (useRandomPath) {
       try {
         // 随机路径模式 - 使用优化的随机路径生成算法
-        path = generateRandomPath(gridPoints, startPoint);
+        // 多次尝试，确保生成足够长的路径
+        let bestPath = [];
+        const maxAttempts = 3;
+        
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          // 每次尝试使用不同的随机种子
+          const attemptSeed = randomSeed + attempt * 1000;
+          if (typeof Math.seedrandom === 'function') {
+            if (restoreRandom) restoreRandom();
+            restoreRandom = Math.seedrandom(attemptSeed.toString());
+          }
+          
+          const attemptPath = generateRandomPath(gridPoints, startPoint);
+          console.log(`尝试 #${attempt + 1} 生成的路径长度: ${attemptPath.length}`);
+          
+          // 保留最长的路径
+          if (attemptPath.length > bestPath.length) {
+            bestPath = attemptPath;
+          }
+          
+          // 如果路径足够长（超过总点数的80%），就不再尝试
+          if (bestPath.length > gridPoints.length * 0.8) {
+            console.log(`路径长度已达到总点数的80%以上，停止尝试`);
+            break;
+          }
+        }
+        
+        path = bestPath;
         
         // 验证路径有效性
         if (!path || path.length <= 1) {
@@ -1481,11 +1594,35 @@ export const generatePath = (gridPoints, startPoint, useRandomPath = false, grid
     // 恢复随机数生成器
     if (restoreRandom) restoreRandom();
     
+    // 最后验证路径的连续性
+    let isPathValid = true;
+    for (let i = 1; i < path.length; i++) {
+      if (!areAdjacent(path[i-1], path[i])) {
+        console.error(`路径在位置 ${i} 处不连续!`);
+        isPathValid = false;
+        break;
+      }
+    }
+    
+    if (!isPathValid) {
+      console.warn('最终生成的路径不连续，尝试修复');
+      // 保留有效的部分
+      const validPath = [path[0]];
+      for (let i = 1; i < path.length; i++) {
+        if (areAdjacent(path[i-1], path[i])) {
+          validPath.push(path[i]);
+        } else {
+          console.log(`在位置 ${i} 处截断不连续的路径`);
+          break;
+        }
+      }
+      path = validPath;
+    }
+    
     return path;
   } catch (error) {
     console.error('路径生成出错:', error);
     // 出错时，尝试返回一个只包含起点的路径
-    alert('路径生成过程中发生错误，请尝试其他起点或使用随机路径模式。');
     return [startPoint];
   }
 };

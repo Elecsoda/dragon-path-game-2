@@ -51,19 +51,19 @@ const CubeFrame = ({
                    
   const lineOpacity = inSelectionMode ? 0.8 : // 选择模式下增加透明度
                      isTempSelected ? 0.8 : 
-                     isClickable ? 0.6 : 0.4; // 加深手动模式下线条的透明度
+                     isClickable ? 0.7 : 0.3; // 加深手动模式下线条的透明度
                      
   const lineWidth = inSelectionMode ? 2 : 
                    isTempSelected ? 2 : 1;
   
   // 起点球体大小 - 增大起点的球体
-  const sphereSize = isStart ? size * 0.4 : size * 0.15;
+  const sphereSize = isStart ? size * 0.2 : size * 0.15;
   
   // 添加起点光晕效果 - 增大起点的光晕
-  const startGlowSize = size * 0.5;
+  const startGlowSize = size * 0.3;
   
   // 添加脉动动画的状态 - 让起点更显眼
-  const startPulseSize = isStart ? size * 0.55 : size * 0.4;
+  const startPulseSize = isStart ? size * 0.35 : size * 0.3;
   
   return (
     <group position={position}>
