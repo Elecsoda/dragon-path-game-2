@@ -483,6 +483,9 @@ const CubeNavigation = forwardRef((props, ref) => {
         
         // 使用更可靠的错误处理
         try {
+          console.log(`开始生成${useRandomPath ? '随机' : '完整'}路径，起点:`, 
+            startPoint.index.x, startPoint.index.y, startPoint.index.z);
+          
           path = generatePath(
             gridPoints.current,
             startPoint,
@@ -504,25 +507,36 @@ const CubeNavigation = forwardRef((props, ref) => {
         // 提示生成的路径长度
         console.log(`生成了包含 ${path.length}/${totalPoints} 个点的路径`);
 
-        // 如果是随机路径且只有起点，重试一次（可能是生成失败）
-        if (useRandomPath && path.length <= 1 && gridPoints.current.length > 1) {
-          console.warn("随机路径生成不正常，只返回了起点，尝试重新生成");
+        // 如果是随机路径且路径太短（少于总点数的10%），重试一次
+        if (useRandomPath && path.length < Math.max(2, totalPoints * 0.1) && gridPoints.current.length > 1) {
+          console.warn("随机路径生成结果太短，尝试重新生成");
           
-          // 重新尝试一次生成随机路径
+          // 重新尝试一次生成随机路径，使用不同的随机种子
           setTimeout(() => {
             try {
-              const retryPath = generateRandomPath(gridPoints.current, startPoint);
-              if (retryPath && retryPath.length > 1) {
-                console.log(`重试成功，生成了包含 ${retryPath.length}/${totalPoints} 个点的路径`);
-                setGeneratedPath(retryPath);
-                animatePathGeneration(retryPath);
-                return;
+              // 使用当前时间作为新的随机种子
+              const newSeed = Date.now().toString();
+              if (typeof Math.seedrandom === 'function') {
+                const restore = Math.seedrandom(newSeed);
+                console.log('重试使用新的随机种子:', newSeed);
+                
+                const retryPath = generateRandomPath(gridPoints.current, startPoint);
+                
+                // 恢复随机数生成器
+                if (restore) restore();
+                
+                if (retryPath && retryPath.length > path.length) {
+                  console.log(`重试成功，生成了包含 ${retryPath.length}/${totalPoints} 个点的路径`);
+                  path = retryPath;
+                } else {
+                  console.log('重试未能生成更长的路径，使用原路径');
+                }
               }
             } catch (error) {
               console.error("重试生成随机路径出错:", error);
             }
             
-            // 如果重试仍然失败，显示当前路径
+            // 无论重试结果如何，都显示最终路径
             setGeneratedPath(path);
             animatePathGeneration(path);
           }, 100);
