@@ -19,6 +19,9 @@ import {
 // 常量
 const CUBE_SIZE = 0.6;
 const GRID_SPACING = 1.5;
+const HIT_AREA_RADIUS = CUBE_SIZE * 0.78;
+const SCREEN_PICK_RADIUS = 34;
+const TOUCH_SCREEN_PICK_RADIUS = 48;
 
 // 辅助函数 - 生成立方体网格点
 const generateGridPoints = (gridSize) => {
@@ -101,6 +104,11 @@ const CubeNavigation = forwardRef((props, ref) => {
   const groupRef = useRef();
   const controlsRef = useRef();
   const gridPoints = useRef(generateGridPoints(gridSize));
+  const currentPathRef = useRef(currentPath);
+  const currentPositionRef = useRef(null);
+  const pointerDrawingRef = useRef(false);
+  const activePointerIdRef = useRef(null);
+  const suppressNextClickRef = useRef(false);
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [pathLine, setPathLine] = useState(null);
   const { camera, raycaster, mouse, scene, gl } = useThree();
@@ -130,15 +138,27 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 当gridSize变化时重新生成网格点
   useEffect(() => {
+    meshRefs.current = {};
     gridPoints.current = generateGridPoints(gridSize);
     // 重置路径和其他状态
     resetPath();
   }, [gridSize]);
 
+  useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
+
+  useEffect(() => {
+    currentPositionRef.current = currentPosition;
+  }, [currentPosition]);
+
   // 存储所有点的mesh引用
   const storeMeshRef = (index, ref) => {
+    const key = `${index.x}-${index.y}-${index.z}`;
     if (ref) {
-      meshRefs.current[`${index.x}-${index.y}-${index.z}`] = ref;
+      meshRefs.current[key] = ref;
+    } else {
+      delete meshRefs.current[key];
     }
   };
 
@@ -220,7 +240,7 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 检查点是否在路径上
   const isPointInPath = (point) => {
-    return currentPath.some(
+    return currentPathRef.current.some(
       (p) =>
         p.index.x === point.index.x &&
         p.index.y === point.index.y &&
@@ -230,16 +250,98 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 检查点是否可点击（必须是相邻的未访问点）
   const isPointClickable = (point) => {
-    if (!manualMode || !currentPosition || !point) return false;
+    const path = currentPathRef.current;
+    const position = currentPositionRef.current;
+
+    if (!manualMode || !position || !point) return false;
     
     // 如果不是绘制模式，不允许添加点（需要先进入绘制模式）
-    if (manualMode && !drawingMode && currentPath.length >= 1) return false;
+    if (manualMode && !drawingMode && path.length >= 1) return false;
 
     // 如果是第一个点，允许点击
-    if (currentPath.length === 0) return true;
+    if (path.length === 0) return true;
 
     // 必须是相邻的未访问点
-    return areAdjacent(currentPosition, point) && !isPointInPath(point);
+    return areAdjacent(position, point) && !isPointInPath(point);
+  };
+
+  const canPickPoint = (point, forAction = false) => {
+    if (!point) return false;
+    if (selectingStartPoint) return true;
+
+    if (manualMode) {
+      if (currentPathRef.current.length === 0) return true;
+      return drawingMode && isPointClickable(point);
+    }
+
+    return !forAction;
+  };
+
+  const syncPointerFromEvent = (event) => {
+    const sourceEvent = event?.nativeEvent || event;
+    const rect = gl.domElement.getBoundingClientRect();
+    const clientX = sourceEvent.clientX ?? 0;
+    const clientY = sourceEvent.clientY ?? 0;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    mouse.x = (x / rect.width) * 2 - 1;
+    mouse.y = -(y / rect.height) * 2 + 1;
+
+    return {
+      x,
+      y,
+      isTouch:
+        sourceEvent.pointerType === "touch" ||
+        sourceEvent.type?.startsWith("touch"),
+      width: rect.width,
+      height: rect.height,
+    };
+  };
+
+  const pointFromObject = (object) => {
+    const index = object?.userData?.index;
+    if (!index) return null;
+    return findPointByIndex(index.x, index.y, index.z);
+  };
+
+  const pickPointFromEvent = (event, { forAction = false } = {}) => {
+    const pointer = syncPointerFromEvent(event);
+
+    raycaster.setFromCamera(mouse, camera);
+    const hitMeshes = Object.values(meshRefs.current);
+    const intersects = raycaster.intersectObjects(hitMeshes, false);
+
+    for (const intersection of intersects) {
+      const point = pointFromObject(intersection.object);
+      if (canPickPoint(point, forAction)) {
+        return point;
+      }
+    }
+
+    const threshold = pointer.isTouch
+      ? TOUCH_SCREEN_PICK_RADIUS
+      : SCREEN_PICK_RADIUS;
+    let closestPoint = null;
+    let closestDistance = Infinity;
+
+    for (const point of gridPoints.current) {
+      if (!canPickPoint(point, forAction)) continue;
+
+      const projected = point.position.clone().project(camera);
+      if (projected.z < -1 || projected.z > 1) continue;
+
+      const screenX = ((projected.x + 1) / 2) * pointer.width;
+      const screenY = ((1 - projected.y) / 2) * pointer.height;
+      const distance = Math.hypot(pointer.x - screenX, pointer.y - screenY);
+
+      if (distance <= threshold && distance < closestDistance) {
+        closestPoint = point;
+        closestDistance = distance;
+      }
+    }
+
+    return closestPoint;
   };
 
   // 处理方向箭头点击
@@ -316,59 +418,63 @@ const CubeNavigation = forwardRef((props, ref) => {
     handleNewStartPoint(point);
   };
 
-  // 处理点击事件，实现点击立方体而不影响视角控制
-  const handleCubeClick = (event) => {
-    // 检查是否点击到立方体
-    raycaster.setFromCamera(mouse, camera);
-    const allMeshes = Object.values(meshRefs.current);
-    const intersects = raycaster.intersectObjects(allMeshes);
-
-    if (intersects.length === 0) {
-      // 没有点击到立方体
-      return;
-    }
-
-    // 临时禁用OrbitControls，以便处理点击事件
-    setOrbitEnabled(false);
-
-    // 创建一个定时器，在短时间后重新启用OrbitControls
-    setTimeout(() => {
-      setOrbitEnabled(true);
-    }, 10);
-
-    const clickedObject = intersects[0].object;
-    const pointKey = Object.keys(meshRefs.current).find(
-      (key) => meshRefs.current[key] === clickedObject
-    );
-
-    if (!pointKey) return;
-
-    const [x, y, z] = pointKey.split("-").map(Number);
-    const clickedPoint = findPointByIndex(x, y, z);
-
-    if (!clickedPoint) return;
+  const handlePickedPoint = (clickedPoint, event) => {
+    if (!clickedPoint) return false;
 
     // 处理有效点击
     if (selectingStartPoint) {
       // 选择起点时，所有格子都可以点击
-      event.stopPropagation();
+      event?.stopPropagation?.();
       onStartPointSelect(clickedPoint);
+      return true;
     } else if (manualMode) {
       // 手动模式下
-      if (currentPath.length === 0) {
+      if (currentPathRef.current.length === 0) {
         // 如果路径为空，设置为起点
-        event.stopPropagation();
+        event?.stopPropagation?.();
         handleNewStartPoint(clickedPoint);
+        return true;
       } else if (drawingMode && isPointClickable(clickedPoint)) {
         // 如果是绘制模式且点是可点击的点（相邻且未访问），则添加到路径
-        event.stopPropagation();
+        event?.stopPropagation?.();
         handleAddPoint(clickedPoint);
+        return true;
       }
     } else {
       // 自动模式下，只有在选择起点模式下才允许点击
       // 无需处理这种情况，因为只有selectingStartPoint为true时才能选择起点
       // 其他情况下什么也不做
     }
+
+    return false;
+  };
+
+  // 处理点击事件，实现点击立方体而不影响视角控制
+  const handleCubeClick = (event) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+
+    const clickedPoint = pickPointFromEvent(event, { forAction: true });
+    if (!clickedPoint) return;
+
+    const handled = handlePickedPoint(clickedPoint, event);
+    if (!handled) return;
+
+    // 临时禁用OrbitControls，以便处理点击事件
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
+    setOrbitEnabled(false);
+
+    // 创建一个定时器，在短时间后重新启用OrbitControls
+    setTimeout(() => {
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+      setOrbitEnabled(true);
+    }, 10);
   };
 
   // 处理选择新起点
@@ -377,6 +483,8 @@ const CubeNavigation = forwardRef((props, ref) => {
 
     // 新起点，重置路径
     const newPath = [point];
+    currentPathRef.current = newPath;
+    currentPositionRef.current = point;
     setCurrentPosition(point);
 
     // 更新可用方向
@@ -398,10 +506,14 @@ const CubeNavigation = forwardRef((props, ref) => {
   const handleAddPoint = (point) => {
     if (!point || !manualMode) return;
 
-    let newPath = [...currentPath];
+    if (isPointInPath(point)) return;
+
+    let newPath = [...currentPathRef.current];
 
     // 添加到路径
     newPath.push(point);
+    currentPathRef.current = newPath;
+    currentPositionRef.current = point;
     setCurrentPosition(point);
 
     // 更新可用方向
@@ -438,6 +550,8 @@ const CubeNavigation = forwardRef((props, ref) => {
       if (fullPoint) {
         // 设置为起点
         const newPath = [fullPoint];
+        currentPathRef.current = newPath;
+        currentPositionRef.current = fullPoint;
         onPathUpdate(newPath);
         setCurrentPosition(fullPoint);
         updateEnabledDirections(fullPoint);
@@ -701,6 +815,7 @@ const CubeNavigation = forwardRef((props, ref) => {
   // 确保鼠标事件正确传播
   useEffect(() => {
     const handleMouseDown = () => {
+      if (suppressNextClickRef.current || pointerDrawingRef.current) return;
       // 确保用户可以通过鼠标拖动旋转视角
       setOrbitEnabled(true);
     };
@@ -723,66 +838,135 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 处理悬停，保持鼠标悬停显示而不干扰控制器
   const handlePointHover = (event) => {
-    // 不阻止事件传播，以便OrbitControls可以继续工作
-    raycaster.setFromCamera(mouse, camera);
+    const point = pickPointFromEvent(event, { forAction: false });
 
-    const allMeshes = Object.values(meshRefs.current);
-    const intersects = raycaster.intersectObjects(allMeshes);
-
-    if (intersects.length > 0) {
-      const hoveredObject = intersects[0].object;
-      const pointKey = Object.keys(meshRefs.current).find(
-        (key) => meshRefs.current[key] === hoveredObject
-      );
-
-      if (pointKey) {
-        const [x, y, z] = pointKey.split("-").map(Number);
-        const point = findPointByIndex(x, y, z);
-
-        // 在选择起点模式下，允许悬停在任何格子上
-        if (selectingStartPoint) {
-          setHoveredPoint(point);
-        } else if (manualMode && !selectingStartPoint) {
-          // 在手动模式下，只有可点击的点才能高亮
-          const isClickable = isPointClickable(point);
-          setHoveredPoint(isClickable ? point : null);
-        } else {
-          // 自动模式下都可以高亮
-          setHoveredPoint(point);
-        }
-      } else {
-        setHoveredPoint(null);
-      }
-    } else {
+    if (!point) {
       setHoveredPoint(null);
+      return;
+    }
+
+    // 在选择起点模式下，允许悬停在任何格子上
+    if (selectingStartPoint) {
+      setHoveredPoint(point);
+    } else if (manualMode && !selectingStartPoint) {
+      // 在手动模式下，只有可点击的点才能高亮；路径为空时任意点都可作为起点
+      const isClickable =
+        currentPathRef.current.length === 0 || isPointClickable(point);
+      setHoveredPoint(isClickable ? point : null);
+    } else {
+      // 自动模式下都可以高亮
+      setHoveredPoint(point);
     }
   };
 
-  // 添加更新的鼠标移动监听器
+  // 添加更新的指针监听器，支持更宽容点击和按住拖动绘制
   useEffect(() => {
     const canvas = gl.domElement;
 
-    // 不阻止事件冒泡，允许OrbitControls接收事件
+    const finishPointerDrawing = (event) => {
+      if (
+        activePointerIdRef.current !== null &&
+        event.pointerId !== activePointerIdRef.current
+      ) {
+        return;
+      }
+
+      pointerDrawingRef.current = false;
+      activePointerIdRef.current = null;
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+      setOrbitEnabled(true);
+
+      try {
+        if (event.pointerId !== undefined) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+      } catch (error) {
+        // 部分浏览器会在未 capture 时抛错，可以安全忽略。
+      }
+    };
+
+    const handlePointerDown = (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
+
+      const point = pickPointFromEvent(event, { forAction: true });
+      if (!point) {
+        setOrbitEnabled(true);
+        return;
+      }
+
+      const handled = handlePickedPoint(point, event);
+      if (!handled) return;
+
+      suppressNextClickRef.current = true;
+      if (controlsRef.current) {
+        controlsRef.current.enabled = false;
+      }
+      setOrbitEnabled(false);
+
+      if (manualMode && drawingMode) {
+        pointerDrawingRef.current = true;
+        activePointerIdRef.current = event.pointerId;
+      }
+
+      try {
+        if (event.pointerId !== undefined) {
+          canvas.setPointerCapture(event.pointerId);
+        }
+      } catch (error) {
+        // Pointer capture 只是增强拖动稳定性，不支持时不影响基础点击。
+      }
+
+      event.preventDefault();
+    };
+
     const handlePointerMove = (event) => {
+      if (
+        pointerDrawingRef.current &&
+        (activePointerIdRef.current === null ||
+          event.pointerId === activePointerIdRef.current)
+      ) {
+        const point = pickPointFromEvent(event, { forAction: true });
+
+        if (point && isPointClickable(point)) {
+          handleAddPoint(point);
+          suppressNextClickRef.current = true;
+        }
+
+        event.preventDefault();
+        return;
+      }
+
       handlePointHover(event);
     };
 
-    canvas.addEventListener("pointermove", handlePointerMove, {
-      passive: true,
+    canvas.addEventListener("pointerdown", handlePointerDown, {
+      passive: false,
     });
+    canvas.addEventListener("pointermove", handlePointerMove, {
+      passive: false,
+    });
+    window.addEventListener("pointerup", finishPointerDrawing);
+    window.addEventListener("pointercancel", finishPointerDrawing);
 
     return () => {
+      canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishPointerDrawing);
+      window.removeEventListener("pointercancel", finishPointerDrawing);
     };
-  }, [selectingStartPoint, manualMode, currentPath, gl]);
+  }, [selectingStartPoint, manualMode, drawingMode, currentPath, gl, camera]);
 
   // 撤回上一步
   const undoLastStep = () => {
-    if (!manualMode || currentPath.length <= 1) return;
+    if (!manualMode || currentPathRef.current.length <= 1) return;
 
     // 创建新路径，删除最后一个点
-    const newPath = [...currentPath];
+    const newPath = [...currentPathRef.current];
     newPath.pop();
+    currentPathRef.current = newPath;
+    currentPositionRef.current = newPath[newPath.length - 1];
 
     // 更新当前位置为新路径的最后一个点
     setCurrentPosition(newPath[newPath.length - 1]);
@@ -800,13 +984,17 @@ const CubeNavigation = forwardRef((props, ref) => {
   // 重置路径
   const resetPath = () => {
     // 保留起点，清除其他点
-    if (currentPath.length > 0) {
-      const startPoint = currentPath[0];
+    if (currentPathRef.current.length > 0) {
+      const startPoint = currentPathRef.current[0];
+      currentPathRef.current = [startPoint];
+      currentPositionRef.current = startPoint;
       onPathUpdate([startPoint]);
       setCurrentPosition(startPoint);
       updateEnabledDirections(startPoint);
       setPathLine(null);
     } else {
+      currentPathRef.current = [];
+      currentPositionRef.current = null;
       onPathUpdate([]);
       setCurrentPosition(null);
       setEnabledDirections([]);
@@ -819,8 +1007,10 @@ const CubeNavigation = forwardRef((props, ref) => {
 
   // 开始绘制路线（清空现有路线，只保留起点）
   const startDrawPath = () => {
-    if (currentPath.length > 0) {
-      const startPoint = currentPath[0];
+    if (currentPathRef.current.length > 0) {
+      const startPoint = currentPathRef.current[0];
+      currentPathRef.current = [startPoint];
+      currentPositionRef.current = startPoint;
       onPathUpdate([startPoint]);
       setCurrentPosition(startPoint);
       updateEnabledDirections(startPoint);
@@ -907,6 +1097,7 @@ const CubeNavigation = forwardRef((props, ref) => {
   const canHighlight = (point) => {
     if (selectingStartPoint) return true;
     if (!manualMode) return true;
+    if (currentPathRef.current.length === 0) return true;
     return clickablePoints.some(
       (p) =>
         p.index.x === point.index.x &&
@@ -948,10 +1139,16 @@ const CubeNavigation = forwardRef((props, ref) => {
             hoveredPoint === point && (canHighlight(point) || !manualMode)
           }
           isTempSelected={isTempSelected(point)}
-          isClickable={selectingStartPoint || manualMode ? (selectingStartPoint || clickablePoints.includes(point)) : true}
+          isClickable={
+            selectingStartPoint ||
+            (manualMode
+              ? currentPath.length === 0 || clickablePoints.includes(point)
+              : true)
+          }
           inSelectionMode={selectingStartPoint}
           userData={{ isGridPoint: true, index: point.index }}
           setMeshRef={(ref) => storeMeshRef(point.index, ref)}
+          hitAreaRadius={HIT_AREA_RADIUS}
         />
       ))}
 

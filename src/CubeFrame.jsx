@@ -13,7 +13,8 @@ const CubeFrame = ({
   isClickable = true,
   inSelectionMode = false,
   userData = {},
-  setMeshRef = null
+  setMeshRef = null,
+  hitAreaRadius = size * 0.75
 }) => {
   const meshRef = useRef();
   
@@ -22,6 +23,12 @@ const CubeFrame = ({
     if (setMeshRef && meshRef.current) {
       setMeshRef(meshRef.current);
     }
+
+    return () => {
+      if (setMeshRef) {
+        setMeshRef(null);
+      }
+    };
   }, [setMeshRef]);
   
   // 确定颜色
@@ -67,9 +74,20 @@ const CubeFrame = ({
   
   return (
     <group position={position}>
+      {/* 始终存在的透明命中区域，让点击/触摸更宽容 */}
+      <mesh ref={meshRef} userData={userData}>
+        <sphereGeometry args={[hitAreaRadius, 16, 16]} />
+        <meshBasicMaterial
+          transparent={true}
+          opacity={0}
+          depthWrite={false}
+          colorWrite={false}
+        />
+      </mesh>
+
       {/* 立方体框架 - 显示起点、终点、路径上的点和临时选择点 */}
       {(isSelected || isStart || isEnd || isTempSelected) && (
-        <mesh ref={meshRef} userData={userData}>
+        <mesh>
           <sphereGeometry args={[sphereSize, 16, 16]} />
           <meshBasicMaterial color={cubeColor} />
         </mesh>
@@ -87,14 +105,6 @@ const CubeFrame = ({
             <meshBasicMaterial color={cubeColor} transparent={true} opacity={0.15} />
           </mesh>
         </>
-      )}
-      
-      {/* 隐藏的点击区域 - 用于点击检测 */}
-      {!isSelected && !isStart && !isEnd && !isTempSelected && (
-        <mesh ref={meshRef} userData={userData} visible={false}>
-          <sphereGeometry args={[size * 0.4, 16, 16]} />
-          <meshBasicMaterial transparent={true} opacity={0} />
-        </mesh>
       )}
       
       {/* 立方体边框 */}
